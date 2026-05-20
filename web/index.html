@@ -1,0 +1,1525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#D17B5C">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="KidPlan">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <title>KidPlan</title>
+  <style>
+    :root {
+      --tag-indoor: #7AA6C2;
+      --tag-outdoor: #8CC084;
+      --tag-day-trip: #E8B25C;
+      --tag-mountains: #4F7A5C;
+      --tag-playdate: #E89B83;
+      --tag-chill: #B8A6D9;
+      --tag-errands: #B8A89A;
+
+      --bg: #FBF8F3;
+      --surface: #FFFFFF;
+      --surface-warm: #F5EFE4;
+      --ink: #2E2A26;
+      --ink-soft: #786E64;
+      --ink-faint: #B8AFA4;
+      --accent: #D17B5C;
+      --accent-soft: #F4D8CB;
+      --good: #6FA378;
+      --warn: #D17B5C;
+
+      --radius-sm: 10px;
+      --radius: 14px;
+      --radius-lg: 20px;
+
+      --shadow-sm: 0 1px 2px rgba(46, 42, 38, 0.05), 0 1px 3px rgba(46, 42, 38, 0.04);
+      --shadow: 0 2px 6px rgba(46, 42, 38, 0.06), 0 4px 12px rgba(46, 42, 38, 0.05);
+      --shadow-lg: 0 8px 24px rgba(46, 42, 38, 0.10);
+
+      --nav-h: 64px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-top: env(safe-area-inset-top, 0px);
+
+      --font-display: 'Fraunces', ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif;
+      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-size: 16px;
+      line-height: 1.45;
+      overscroll-behavior-y: none;
+    }
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+    button {
+      font-family: inherit;
+      font-size: inherit;
+      color: inherit;
+      border: none;
+      background: none;
+      cursor: pointer;
+      padding: 0;
+    }
+    a { color: var(--accent); text-decoration: none; }
+
+    /* ---------- Layout ---------- */
+    #root {
+      max-width: 480px;
+      margin: 0 auto;
+      padding-top: calc(var(--safe-top) + 8px);
+      padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 24px);
+      min-height: 100dvh;
+    }
+
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px 4px;
+    }
+    .app-header .brand {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 22px;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+    }
+    .app-header .brand .dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-right: 7px;
+      vertical-align: middle;
+      transform: translateY(-2px);
+    }
+    .app-header .header-actions { display: flex; gap: 10px; align-items: center; color: var(--ink-soft); }
+    .icon-btn {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--ink-soft);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+    .icon-btn:active { transform: scale(0.96); }
+
+    .view { padding: 12px 20px 24px; }
+    .view-title {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 26px;
+      letter-spacing: -0.01em;
+      margin: 8px 0 4px;
+    }
+    .view-sub {
+      color: var(--ink-soft);
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    /* ---------- Today view ---------- */
+    .today-hero {
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      padding: 22px 22px 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+    .today-hero::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 6px;
+      background: var(--primary-tag-color, var(--accent));
+    }
+    .today-date-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .today-date {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 24px;
+      letter-spacing: -0.01em;
+      line-height: 1.15;
+    }
+    .today-weather {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--ink-soft);
+      background: var(--surface-warm);
+      border-radius: 999px;
+      padding: 6px 12px;
+    }
+    .day-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 14px;
+      color: var(--ink-soft);
+      font-size: 13px;
+    }
+    .day-nav button {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--ink-soft);
+    }
+    .day-nav button:hover { background: var(--surface-warm); }
+    .day-nav .today-link {
+      margin-left: auto;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      background: var(--surface-warm);
+      color: var(--ink-soft);
+      border: 1px solid transparent;
+    }
+    .tag-chip.primary {
+      padding: 10px 18px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      background: var(--chip-color, var(--accent));
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+    .tag-chip .swatch {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--chip-color, var(--accent));
+    }
+    .tag-chip.outlined {
+      background: transparent;
+      border-color: var(--ink-faint);
+      color: var(--ink-soft);
+    }
+
+    .plan-section {
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow);
+    }
+    .plan-section h3 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 17px;
+      margin: 0 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .plan-section h3 .label-pill {
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 3px 9px;
+      border-radius: 999px;
+    }
+    .plan-section h3 .label-pill.b {
+      background: #E6E0F0;
+      color: #6F5BAA;
+    }
+
+    .kid-group { margin-top: 10px; }
+    .kid-group:first-of-type { margin-top: 0; }
+    .kid-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      margin: 8px 0 6px;
+    }
+    .plan-item {
+      display: flex;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--surface-warm);
+    }
+    .plan-item:last-child { border-bottom: none; }
+    .plan-item .time {
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+      color: var(--ink-soft);
+      min-width: 60px;
+      padding-top: 1px;
+    }
+    .plan-item .body { flex: 1; }
+    .plan-item .title { font-weight: 500; font-size: 15px; color: var(--ink); }
+    .plan-item .location { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+
+    .plan-b-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 6px 0 2px;
+    }
+    .plan-b-content .body { flex: 1; }
+    .plan-b-content .body .name { font-weight: 500; }
+    .plan-b-content .body .desc { color: var(--ink-soft); font-size: 13px; margin-top: 3px; }
+    .plan-b-content .chevron { color: var(--ink-faint); padding-top: 2px; }
+
+    .cta-row { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+    .btn-primary {
+      width: 100%;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      font-size: 15px;
+      padding: 15px 20px;
+      border-radius: var(--radius);
+      box-shadow: 0 4px 12px rgba(209, 123, 92, 0.25);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-primary:active { transform: translateY(1px); }
+    .btn-secondary {
+      width: 100%;
+      background: var(--surface);
+      color: var(--ink);
+      font-weight: 500;
+      font-size: 14px;
+      padding: 12px 18px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    /* ---------- Week view ---------- */
+    .week-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .week-title {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 19px;
+      letter-spacing: -0.01em;
+    }
+    .week-nav-btn {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--ink-soft);
+    }
+    .week-sub {
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 14px;
+    }
+    .week-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .day-row {
+      display: flex;
+      align-items: stretch;
+      background: var(--surface);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      min-height: 72px;
+      text-align: left;
+      width: 100%;
+    }
+    .day-row .stripe {
+      width: 6px;
+      background: var(--row-color, var(--ink-faint));
+      flex-shrink: 0;
+    }
+    .day-row .day-content {
+      flex: 1;
+      padding: 12px 14px 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .day-row .date-block {
+      flex-shrink: 0;
+      width: 48px;
+      text-align: center;
+    }
+    .day-row .dow {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink-soft);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .day-row .dom {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 22px;
+      line-height: 1.05;
+      color: var(--ink);
+    }
+    .day-row .summary {
+      flex: 1;
+      min-width: 0;
+    }
+    .day-row .summary .primary-line {
+      font-size: 14px;
+      color: var(--ink);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .day-row .summary .tag-line {
+      font-size: 11px;
+      color: var(--ink-soft);
+      margin-top: 2px;
+      letter-spacing: 0.02em;
+      text-transform: lowercase;
+    }
+    .day-row .icons {
+      display: flex;
+      gap: 6px;
+      color: var(--ink-faint);
+      flex-shrink: 0;
+    }
+    .day-row.today { box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow-sm); }
+
+    /* ---------- Library view ---------- */
+    .filter-bar {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 2px 0 12px;
+      margin: 0 -4px 6px;
+      scrollbar-width: none;
+    }
+    .filter-bar::-webkit-scrollbar { display: none; }
+    .filter-chip {
+      flex-shrink: 0;
+      padding: 7px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      background: var(--surface);
+      color: var(--ink-soft);
+      box-shadow: var(--shadow-sm);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .filter-chip .swatch {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--chip-color, var(--ink-faint));
+    }
+    .filter-chip.active {
+      background: var(--ink);
+      color: #fff;
+    }
+    .filter-chip.active .swatch { box-shadow: 0 0 0 2px var(--ink); }
+
+    .library-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .library-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .library-card .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .library-card .name {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .library-card .swatch {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--chip-color, var(--ink-faint));
+    }
+    .library-card .meta {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+    .library-card .desc {
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--ink-soft);
+      line-height: 1.4;
+    }
+    .age-pill {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--surface-warm);
+      color: var(--ink-soft);
+      font-weight: 500;
+    }
+
+    .fab {
+      position: fixed;
+      right: 50%;
+      transform: translateX(min(220px, 45vw));
+      bottom: calc(var(--nav-h) + var(--safe-bottom) + 18px);
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 6px 20px rgba(209, 123, 92, 0.40);
+      z-index: 15;
+    }
+    .fab:active { transform: translateX(min(220px, 45vw)) scale(0.95); }
+
+    /* ---------- Photos view ---------- */
+    .photo-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .photo-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 12px;
+      box-shadow: var(--shadow-sm);
+      text-align: left;
+      width: 100%;
+    }
+    .photo-thumb {
+      width: 72px;
+      height: 72px;
+      border-radius: 10px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--ink-soft);
+      text-align: center;
+      line-height: 1.2;
+      padding: 4px;
+      background: linear-gradient(135deg, var(--surface-warm), #ECE3D2);
+    }
+    .photo-info { flex: 1; min-width: 0; }
+    .photo-date {
+      font-weight: 500;
+      font-size: 14px;
+      color: var(--ink);
+    }
+    .photo-meta {
+      font-size: 12px;
+      color: var(--ink-soft);
+      margin-top: 2px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 9px;
+      border-radius: 999px;
+      margin-top: 6px;
+    }
+    .badge.good { background: #DDEEDD; color: #4F7A5C; }
+    .badge.warn { background: #F8DCD2; color: #B95A3A; }
+    .badge.pending { background: #F0EAD8; color: #8B7B4A; }
+
+    /* Reconciliation diff (stub) */
+    .diff-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .diff-panel {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .diff-panel h4 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+    .diff-ocr {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      color: var(--ink);
+      background: var(--surface-warm);
+      padding: 12px;
+      border-radius: 10px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .extracted-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 0;
+      border-bottom: 1px dashed var(--surface-warm);
+    }
+    .extracted-row:last-child { border: none; }
+    .extracted-row .er-body { flex: 1; min-width: 0; }
+    .extracted-row .er-title { font-weight: 500; font-size: 14px; }
+    .extracted-row .er-meta { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+    .er-actions { display: flex; gap: 6px; }
+    .er-btn {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .er-btn.accept { background: #DDEEDD; color: #4F7A5C; }
+    .er-btn.edit { background: var(--surface-warm); color: var(--ink-soft); }
+    .er-btn.reject { background: #F8DCD2; color: #B95A3A; }
+
+    /* ---------- Settings view ---------- */
+    .settings-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow-sm);
+    }
+    .settings-section h3 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 15px;
+      margin: 0 0 10px;
+    }
+    .settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--surface-warm);
+      font-size: 14px;
+    }
+    .settings-row:last-child { border-bottom: none; }
+    .settings-row .label { color: var(--ink-soft); }
+    .settings-row .value { color: var(--ink); font-weight: 500; text-align: right; }
+    .tag-mgmt {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--surface-warm);
+    }
+    .tag-mgmt:last-of-type { border: none; }
+    .tag-mgmt .swatch {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+    }
+    .tag-mgmt .name { font-size: 14px; flex: 1; }
+    .tag-mgmt .order { font-size: 12px; color: var(--ink-faint); }
+    .link-btn {
+      color: var(--accent);
+      font-weight: 500;
+      font-size: 14px;
+      padding: 8px 0 2px;
+    }
+
+    /* ---------- Bottom nav ---------- */
+    .bottom-nav {
+      position: fixed;
+      left: 0; right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: saturate(180%) blur(14px);
+      -webkit-backdrop-filter: saturate(180%) blur(14px);
+      border-top: 1px solid rgba(46, 42, 38, 0.06);
+      padding-bottom: var(--safe-bottom);
+      z-index: 20;
+    }
+    .nav-inner {
+      max-width: 480px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      height: var(--nav-h);
+    }
+    .nav-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      color: var(--ink-faint);
+      font-size: 10.5px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+    .nav-btn svg { display: block; }
+    .nav-btn.active { color: var(--accent); }
+
+    /* ---------- Modal ---------- */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(46, 42, 38, 0.40);
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 50;
+      animation: fade 0.18s ease;
+    }
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+    .modal {
+      background: var(--bg);
+      border-radius: 22px 22px 0 0;
+      width: 100%;
+      max-width: 480px;
+      padding: 22px 22px calc(28px + var(--safe-bottom));
+      animation: slideUp 0.22s ease;
+    }
+    @keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .modal h3 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 19px;
+      margin: 0 0 8px;
+    }
+    .modal p {
+      color: var(--ink-soft);
+      font-size: 14px;
+      margin: 0 0 18px;
+      line-height: 1.5;
+    }
+    .modal-close {
+      width: 100%;
+      background: var(--ink);
+      color: #fff;
+      padding: 13px;
+      border-radius: var(--radius);
+      font-weight: 600;
+    }
+
+    /* Tag swatch resolver classes */
+    .c-indoor { --chip-color: var(--tag-indoor); --row-color: var(--tag-indoor); --primary-tag-color: var(--tag-indoor); }
+    .c-outdoor { --chip-color: var(--tag-outdoor); --row-color: var(--tag-outdoor); --primary-tag-color: var(--tag-outdoor); }
+    .c-day-trip { --chip-color: var(--tag-day-trip); --row-color: var(--tag-day-trip); --primary-tag-color: var(--tag-day-trip); }
+    .c-mountains { --chip-color: var(--tag-mountains); --row-color: var(--tag-mountains); --primary-tag-color: var(--tag-mountains); }
+    .c-playdate { --chip-color: var(--tag-playdate); --row-color: var(--tag-playdate); --primary-tag-color: var(--tag-playdate); }
+    .c-chill { --chip-color: var(--tag-chill); --row-color: var(--tag-chill); --primary-tag-color: var(--tag-chill); }
+    .c-errands { --chip-color: var(--tag-errands); --row-color: var(--tag-errands); --primary-tag-color: var(--tag-errands); }
+
+    .empty-state {
+      text-align: center;
+      color: var(--ink-soft);
+      padding: 40px 20px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <nav class="bottom-nav" id="bottomNav"></nav>
+
+  <script>
+    'use strict';
+
+    // Wave 3 will replace this with the real GAS web-app deployment URL.
+    const API_URL = '__SET_AFTER_DEPLOY__';
+
+    // ============================================================
+    // Helpers
+    // ============================================================
+    function escapeHtml(s) {
+      if (s === null || s === undefined) return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function isoDate(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+    function parseISO(s) {
+      const [y, m, d] = s.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    function addDays(d, n) {
+      const r = new Date(d);
+      r.setDate(r.getDate() + n);
+      return r;
+    }
+    function startOfWeek(d) {
+      // Sunday-start
+      const r = new Date(d);
+      r.setDate(r.getDate() - r.getDay());
+      return r;
+    }
+    const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    function formatLongDate(d) {
+      return `${DOW_LONG[d.getDay()]}, ${MONTH[d.getMonth()]} ${d.getDate()}`;
+    }
+    function formatWeekHeader(d) {
+      return `Week of ${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
+    }
+    function formatTime(t) {
+      // t is "HH:MM" 24h
+      if (!t) return '';
+      const [h, m] = t.split(':').map(Number);
+      const hr12 = ((h + 11) % 12) + 1;
+      const ampm = h >= 12 ? 'pm' : 'am';
+      return m === 0 ? `${hr12}${ampm}` : `${hr12}:${String(m).padStart(2, '0')}${ampm}`;
+    }
+    function tagClass(tag) {
+      return 'c-' + (tag || '').toLowerCase().replace(/\s+/g, '-');
+    }
+    function tagLabel(tag) {
+      const map = {
+        'indoor': 'Indoor',
+        'outdoor': 'Outdoor',
+        'day-trip': 'Day Trip',
+        'mountains': 'Mountains',
+        'playdate': 'Playdate',
+        'chill': 'Chill',
+        'errands': 'Errands'
+      };
+      return map[tag] || tag;
+    }
+
+    // ============================================================
+    // Icons (inline SVG, stroke 1.7, friendly)
+    // ============================================================
+    const ICONS = {
+      calendar: (filled) => filled
+        ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="16" rx="3"/><rect x="3" y="5" width="18" height="5" rx="3" fill="currentColor" opacity="0.6"/><rect x="7" y="2" width="2" height="5" rx="1" fill="currentColor"/><rect x="15" y="2" width="2" height="5" rx="1" fill="currentColor"/></svg>`
+        : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg>`,
+      week: (filled) => filled
+        ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="4" width="18" height="3.5" rx="1.5"/><rect x="3" y="10" width="18" height="3.5" rx="1.5" opacity="0.7"/><rect x="3" y="16" width="18" height="3.5" rx="1.5" opacity="0.45"/></svg>`
+        : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="4" width="18" height="3.5" rx="1.5"/><rect x="3" y="10" width="18" height="3.5" rx="1.5"/><rect x="3" y="16" width="18" height="3.5" rx="1.5"/></svg>`,
+      bookmark: (filled) => filled
+        ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>`
+        : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>`,
+      camera: (filled) => filled
+        ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M9 4h6l1.5 2.5H20a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2h3.5L9 4z"/><circle cx="12" cy="13.5" r="3.5" fill="#fff"/></svg>`
+        : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M9 4h6l1.5 2.5H20a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2h3.5L9 4z"/><circle cx="12" cy="13.5" r="3.5"/></svg>`,
+      gear: (filled) => filled
+        ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l1.6 2.2 2.7-.4 1 2.5 2.4 1.3-.6 2.6 1.8 2-1.8 2 .6 2.6-2.4 1.3-1 2.5-2.7-.4L12 21.5l-1.6-2.2-2.7.4-1-2.5-2.4-1.3.6-2.6-1.8-2 1.8-2-.6-2.6 2.4-1.3 1-2.5 2.7.4L12 2.5z"/><circle cx="12" cy="12" r="3" fill="#fff"/></svg>`
+        : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 2.5l1.6 2.2 2.7-.4 1 2.5 2.4 1.3-.6 2.6 1.8 2-1.8 2 .6 2.6-2.4 1.3-1 2.5-2.7-.4L12 21.5l-1.6-2.2-2.7.4-1-2.5-2.4-1.3.6-2.6-1.8-2 1.8-2-.6-2.6 2.4-1.3 1-2.5 2.7.4L12 2.5z"/><circle cx="12" cy="12" r="3"/></svg>`,
+      rain: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14a4 4 0 0 1-.5-7.97A6 6 0 0 1 18.5 8.5 3.5 3.5 0 0 1 17.5 15"/><path d="M8 18l-1 2"/><path d="M12 18l-1 2"/><path d="M16 18l-1 2"/></svg>`,
+      indoor: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><rect x="10" y="14" width="4" height="6"/></svg>`,
+      outdoor: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg>`,
+      bookmarkSm: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>`,
+      penSm: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z"/></svg>`,
+      chevR: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
+      chevL: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-9 6 9 6"/></svg>`,
+      plus: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
+      pencil: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z"/></svg>`,
+      camIcon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M9 4h6l1.5 2.5H20a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2h3.5L9 4z"/><circle cx="12" cy="13.5" r="3.5"/></svg>`,
+      check: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>`,
+      x: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+    };
+
+    // ============================================================
+    // Mock data (Wave 1 only — Wave 3 swaps fetchMock for real fetch)
+    // ============================================================
+    const MOCK_DAYS = [
+      { date: '2026-06-15', primary_tag: 'chill', tags: ['chill','indoor'], plan_a_summary: 'Slow morning, library trip, sprinkler in the yard', plan_b_pointer: 'lib-craft-1', plan_b_custom_text: '', weather_sensitive: false, confidence: 'planned' },
+      { date: '2026-06-16', primary_tag: 'mountains', tags: ['mountains','outdoor','day-trip'], plan_a_summary: 'Brainard Lake hike + picnic lunch', plan_b_pointer: 'custom', plan_b_custom_text: 'Movie afternoon at home if smoke from the fires is bad — check AirNow at 7am.', weather_sensitive: true, confidence: 'planned' },
+      { date: '2026-06-17', primary_tag: 'playdate', tags: ['playdate','outdoor'], plan_a_summary: "Eleanor's 4th birthday party 2pm at Foothills Park", plan_b_pointer: 'lib-museum', plan_b_custom_text: '', weather_sensitive: true, confidence: 'locked' },
+      { date: '2026-06-18', primary_tag: 'outdoor', tags: ['outdoor'], plan_a_summary: 'Boulder Reservoir morning, lunch at home, nap', plan_b_pointer: 'lib-movie', plan_b_custom_text: '', weather_sensitive: true, confidence: 'planned' },
+      { date: '2026-06-19', primary_tag: 'errands', tags: ['errands','indoor'], plan_a_summary: 'Costco run, haircuts, pickup library holds', plan_b_pointer: 'custom', plan_b_custom_text: 'Skip Costco if Henry is still coughing — order delivery instead.', weather_sensitive: false, confidence: 'tentative' },
+      { date: '2026-06-20', primary_tag: 'day-trip', tags: ['day-trip','outdoor'], plan_a_summary: 'Denver Zoo with the Patel cousins', plan_b_pointer: 'lib-museum', plan_b_custom_text: '', weather_sensitive: true, confidence: 'planned' },
+      { date: '2026-06-21', primary_tag: 'chill', tags: ['chill'], plan_a_summary: "Father's Day — pancakes, bike ride on Boulder Creek path", plan_b_pointer: 'custom', plan_b_custom_text: 'Backyard movie + popcorn after the kids go down.', weather_sensitive: false, confidence: 'planned' },
+      { date: '2026-06-22', primary_tag: 'indoor', tags: ['indoor','playdate'], plan_a_summary: 'Henry to camp 9-3, Mia playdate with Theo at our house', plan_b_pointer: 'lib-craft-2', plan_b_custom_text: '', weather_sensitive: false, confidence: 'planned' },
+      { date: '2026-06-23', primary_tag: 'outdoor', tags: ['outdoor'], plan_a_summary: 'Chautauqua trail loop early, splash pad after lunch', plan_b_pointer: 'lib-craft-1', plan_b_custom_text: '', weather_sensitive: true, confidence: 'planned' },
+      { date: '2026-06-24', primary_tag: 'day-trip', tags: ['day-trip','mountains'], plan_a_summary: 'Estes Park — Stanley scones, bumper boats, dinner Bird & Jim', plan_b_pointer: 'custom', plan_b_custom_text: 'If anyone is car-sick prone today, stay local — Eldorado Canyon picnic instead.', weather_sensitive: true, confidence: 'tentative' },
+      { date: '2026-06-25', primary_tag: 'chill', tags: ['chill','indoor'], plan_a_summary: 'Pajama morning, baking afternoon, early dinner', plan_b_pointer: 'lib-movie', plan_b_custom_text: '', weather_sensitive: false, confidence: 'planned' },
+      { date: '2026-06-26', primary_tag: 'playdate', tags: ['playdate','outdoor'], plan_a_summary: 'Park meetup with the Nguyens at North Boulder Park 10am', plan_b_pointer: 'lib-museum', plan_b_custom_text: '', weather_sensitive: true, confidence: 'planned' },
+      { date: '2026-06-27', primary_tag: 'outdoor', tags: ['outdoor','day-trip'], plan_a_summary: 'Farmers market then St. Vrain tubing if water level is safe', plan_b_pointer: 'custom', plan_b_custom_text: 'Stay at farmers market longer + bookstore if tubing is a no.', weather_sensitive: true, confidence: 'tentative' },
+      { date: '2026-06-28', primary_tag: 'mountains', tags: ['mountains','outdoor'], plan_a_summary: 'Caribou Ranch easy loop, blueberry pancakes after', plan_b_pointer: 'lib-craft-1', plan_b_custom_text: '', weather_sensitive: true, confidence: 'planned' }
+    ];
+
+    const MOCK_PLAN_ITEMS = {
+      '2026-06-16': [
+        { kid: 'shared', start: '07:30', title: 'Drive up Peak-to-Peak', location: 'Boulder → Brainard' },
+        { kid: 'shared', start: '09:30', title: 'Brainard Lake easy loop', location: 'Brainard Lake' },
+        { kid: 'shared', start: '12:00', title: 'Picnic lunch by the lake' },
+        { kid: 'younger', start: '13:30', title: 'Nap in the carrier on hike out' },
+        { kid: 'elder', start: '14:00', title: 'Pine cone scavenger hunt' },
+        { kid: 'shared', start: '17:00', title: 'Pizza at Cosmo dinner home' }
+      ],
+      '2026-06-17': [
+        { kid: 'shared', start: '09:00', title: 'Slow morning + library books' },
+        { kid: 'elder', start: '11:00', title: 'Wrap Eleanor present', location: 'Home' },
+        { kid: 'shared', start: '14:00', title: "Eleanor's 4th birthday party", location: 'Foothills Park pavilion' },
+        { kid: 'younger', start: '16:30', title: 'Likely nap in car on way home' }
+      ],
+      '2026-06-18': [
+        { kid: 'shared', start: '09:00', title: 'Boulder Reservoir swim', location: 'Boulder Reservoir' },
+        { kid: 'shared', start: '12:00', title: 'Lunch at home + quiet time' },
+        { kid: 'elder', start: '15:30', title: 'Bike ride driveway loops' }
+      ]
+    };
+
+    const MOCK_LIBRARY = [
+      { id: 'lib-craft-1', name: 'Rainy-day watercolor station', tag: 'indoor', description: 'Set up the kitchen table with watercolor paper + the big tray. Works for both kids.', indoor: true, age_fit: 'both', duration: 60 },
+      { id: 'lib-craft-2', name: 'Cardboard box fort afternoon', tag: 'indoor', description: 'Save the Costco boxes. Markers, tape, fairy lights from the basement.', indoor: true, age_fit: 'both', duration: 120 },
+      { id: 'lib-museum', name: "Boulder Children's Museum", tag: 'indoor', description: 'Member pass in glove box. Best before 11am or after 3pm to dodge the crowds.', indoor: true, age_fit: 'both', duration: 150 },
+      { id: 'lib-movie', name: 'Movie afternoon at home', tag: 'chill', description: 'Popcorn, blanket fort, lights down. Solid go-to for sick days.', indoor: true, age_fit: 'both', duration: 100 },
+      { id: 'lib-park-nbp', name: 'North Boulder Park morning', tag: 'outdoor', description: 'Big shade trees, water fountain, easy bathroom. Good before 10am in heat.', indoor: false, age_fit: 'both', duration: 90 },
+      { id: 'lib-park-foothills', name: 'Foothills Park & creek', tag: 'outdoor', description: 'Henry loves the creek. Bring extra clothes and water shoes.', indoor: false, age_fit: 'both', duration: 120 },
+      { id: 'lib-splash', name: 'Scott Carpenter splash pad', tag: 'outdoor', description: 'Free, shaded, runs 10am-6pm summer. Skate park nearby for Henry.', indoor: false, age_fit: 'both', duration: 90 },
+      { id: 'lib-library', name: 'Main Library story time', tag: 'indoor', description: 'Tuesday + Thursday 10:30. Mia hyper-focuses; Henry just wants the puzzle bin.', indoor: true, age_fit: 'young', duration: 60 },
+      { id: 'lib-bike', name: 'Boulder Creek path bike ride', tag: 'outdoor', description: 'Henry on his pedal bike, Mia in the trailer. Snack at Eben G. Fine.', indoor: false, age_fit: 'older', duration: 90 },
+      { id: 'lib-bake', name: 'Baking project afternoon', tag: 'chill', description: 'Banana bread or chocolate chip cookies. Both kids can scoop.', indoor: true, age_fit: 'both', duration: 75 }
+    ];
+
+    const MOCK_PHOTOS = [
+      { id: 'p1', date: '2026-06-14', uploaded_at: '2026-06-14 19:42', status: 'reconciled', covers: 'June 14-21' },
+      { id: 'p2', date: '2026-06-08', uploaded_at: '2026-06-08 08:15', status: 'needs_review', covers: 'June 8-14', ocr_preview: "MON 8\n  Henry camp 9-3\n  Mia gym class 10\nTUE 9\n  CISCO 4pm Sam\n  groceries\nWED 10\n  hike?\n  Eleanor bday 2pm Sat\nTHU 11\n  rest day\n  laundry" },
+      { id: 'p3', date: '2026-06-01', uploaded_at: '2026-06-01 20:08', status: 'reconciled', covers: 'June 1-7' }
+    ];
+
+    const MOCK_TAGS = [
+      { tag: 'outdoor', display_order: 1 },
+      { tag: 'indoor', display_order: 2 },
+      { tag: 'mountains', display_order: 3 },
+      { tag: 'day-trip', display_order: 4 },
+      { tag: 'playdate', display_order: 5 },
+      { tag: 'chill', display_order: 6 },
+      { tag: 'errands', display_order: 7 }
+    ];
+
+    const MOCK_SETTINGS = {
+      family_calendar: 'Geddes Family (write)',
+      read_only_calendars: ['Tyler — Work', "Soleil — Work", 'Mia — Preschool', 'Boulder Public Library Events'],
+      photo_folder: '/KidPlan/calendar-photos/',
+      app_version: '0.1.0'
+    };
+
+    // ============================================================
+    // Single global app
+    // ============================================================
+    const app = {
+      state: {
+        currentView: 'today',
+        currentDate: '2026-06-16', // pinned within mock range so the view is rich on first load
+        weekStart: '2026-06-15',
+        libraryFilter: 'all',
+        modal: null
+      },
+
+      mockData: {
+        days: MOCK_DAYS,
+        planItems: MOCK_PLAN_ITEMS,
+        library: MOCK_LIBRARY,
+        photos: MOCK_PHOTOS,
+        tags: MOCK_TAGS,
+        settings: MOCK_SETTINGS
+      },
+
+      // Wave 3 will swap this for `fetch(API_URL + '?action=' + action, ...)`
+      fetchMock(action, params) {
+        params = params || {};
+        switch (action) {
+          case 'getDay': {
+            const day = this.mockData.days.find(d => d.date === params.date) || null;
+            const items = this.mockData.planItems[params.date] || [];
+            return Promise.resolve({ day, items });
+          }
+          case 'getWeek': {
+            const start = parseISO(params.weekStart);
+            const dates = Array.from({length: 7}, (_, i) => isoDate(addDays(start, i)));
+            const days = dates.map(d => this.mockData.days.find(x => x.date === d) || { date: d, primary_tag: null, tags: [], plan_a_summary: '', weather_sensitive: false });
+            return Promise.resolve({ days });
+          }
+          case 'getLibrary':
+            return Promise.resolve({ items: this.mockData.library });
+          case 'getPhotos':
+            return Promise.resolve({ photos: this.mockData.photos });
+          case 'getSettings':
+            return Promise.resolve({ settings: this.mockData.settings, tags: this.mockData.tags });
+          default:
+            return Promise.resolve({});
+        }
+      },
+
+      navigate(view, params) {
+        this.state.currentView = view;
+        if (params) Object.assign(this.state, params);
+        this.render();
+      },
+
+      jumpToDay(date) {
+        this.state.currentDate = date;
+        this.state.currentView = 'today';
+        this.render();
+      },
+
+      shiftDay(delta) {
+        const d = parseISO(this.state.currentDate);
+        this.state.currentDate = isoDate(addDays(d, delta));
+        this.render();
+      },
+
+      shiftWeek(delta) {
+        const d = parseISO(this.state.weekStart);
+        this.state.weekStart = isoDate(addDays(d, delta * 7));
+        this.render();
+      },
+
+      goToToday() {
+        // "Today" for mocked data = pinned reference day in June 2026.
+        this.state.currentDate = '2026-06-16';
+        this.state.weekStart = '2026-06-15';
+        this.render();
+      },
+
+      setLibraryFilter(tag) {
+        this.state.libraryFilter = tag;
+        this.render();
+      },
+
+      openModal(title, body) {
+        this.state.modal = { title, body };
+        this.render();
+      },
+
+      closeModal() {
+        this.state.modal = null;
+        this.render();
+      },
+
+      stubEdit() {
+        this.openModal('Edit day', 'Editing days lands in Wave 3. For now this is a tap-target placeholder so the flow feels real.');
+      },
+
+      stubPhotoUpload() {
+        this.openModal('Sync paper calendar', 'Camera capture and OCR reconciliation land in Wave 4. Tap a photo on the Photos tab to preview the reconciliation diff UI.');
+      },
+
+      stubAddFallback() {
+        this.openModal('Add fallback', 'Library editing lands in Wave 3. Wave 1 ships read-only library data.');
+      },
+
+      stubReconcile(photoId) {
+        const photo = this.mockData.photos.find(p => p.id === photoId);
+        if (!photo) return;
+        this.state.modal = { title: 'reconcile', photoId };
+        this.render();
+      },
+
+      // ============================================================
+      // Render
+      // ============================================================
+      render() {
+        const root = document.getElementById('root');
+        let view;
+        switch (this.state.currentView) {
+          case 'today':    view = this.viewToday(); break;
+          case 'week':     view = this.viewWeek(); break;
+          case 'library':  view = this.viewLibrary(); break;
+          case 'photos':   view = this.viewPhotos(); break;
+          case 'settings': view = this.viewSettings(); break;
+          default:         view = this.viewToday();
+        }
+
+        root.innerHTML = `
+          <header class="app-header">
+            <div class="brand"><span class="dot"></span>KidPlan</div>
+            <div class="header-actions">
+              <button class="icon-btn" onclick="app.stubEdit()" aria-label="Edit">${ICONS.pencil}</button>
+            </div>
+          </header>
+          ${view}
+          ${this.renderModal()}
+        `;
+
+        this.renderNav();
+        window.scrollTo(0, 0);
+      },
+
+      renderNav() {
+        const nav = document.getElementById('bottomNav');
+        const cur = this.state.currentView;
+        const tabs = [
+          { id: 'today', label: 'Today', icon: 'calendar' },
+          { id: 'week', label: 'Week', icon: 'week' },
+          { id: 'library', label: 'Library', icon: 'bookmark' },
+          { id: 'photos', label: 'Photos', icon: 'camera' },
+          { id: 'settings', label: 'Settings', icon: 'gear' }
+        ];
+        nav.innerHTML = `
+          <div class="nav-inner">
+            ${tabs.map(t => `
+              <button class="nav-btn ${cur === t.id ? 'active' : ''}" onclick="app.navigate('${t.id}')" aria-label="${t.label}">
+                ${ICONS[t.icon](cur === t.id)}
+                <span>${t.label}</span>
+              </button>
+            `).join('')}
+          </div>
+        `;
+      },
+
+      renderModal() {
+        const m = this.state.modal;
+        if (!m) return '';
+        if (m.title === 'reconcile') {
+          return this.renderReconcileModal(m.photoId);
+        }
+        return `
+          <div class="modal-backdrop" onclick="if(event.target===this) app.closeModal()">
+            <div class="modal">
+              <h3>${escapeHtml(m.title)}</h3>
+              <p>${escapeHtml(m.body)}</p>
+              <button class="modal-close" onclick="app.closeModal()">Got it</button>
+            </div>
+          </div>
+        `;
+      },
+
+      renderReconcileModal(photoId) {
+        const photo = this.mockData.photos.find(p => p.id === photoId);
+        if (!photo) return '';
+        const ocr = photo.ocr_preview || 'MON 15\n  Henry camp 9-3\n  reservoir after\nTUE 16\n  Brainard hike\n  picnic\nWED 17\n  Eleanor bday 2pm\n  Foothills';
+        const extracted = [
+          { date: 'Mon Jun 15', title: 'Henry camp', time: '9:00 - 3:00pm', confidence: 'high' },
+          { date: 'Mon Jun 15', title: 'Boulder Reservoir', time: 'afternoon', confidence: 'med' },
+          { date: 'Tue Jun 16', title: 'Brainard Lake hike', time: 'morning', confidence: 'high' },
+          { date: 'Wed Jun 17', title: "Eleanor's birthday", time: '2:00pm', confidence: 'high' },
+          { date: 'Wed Jun 17', title: 'Foothills Park', time: 'after party', confidence: 'low' }
+        ];
+        return `
+          <div class="modal-backdrop" onclick="if(event.target===this) app.closeModal()">
+            <div class="modal" style="border-radius: 22px 22px 0 0; max-height: 90vh; overflow-y: auto;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                <h3 style="margin:0;">Reconcile photo</h3>
+                <button class="icon-btn" onclick="app.closeModal()" aria-label="Close">${ICONS.x}</button>
+              </div>
+              <p style="margin-bottom:14px;">Uploaded ${escapeHtml(photo.uploaded_at)} · covers ${escapeHtml(photo.covers)}</p>
+              <div class="diff-grid">
+                <div class="diff-panel">
+                  <h4>Raw OCR</h4>
+                  <div class="diff-ocr">${escapeHtml(ocr)}</div>
+                </div>
+                <div class="diff-panel">
+                  <h4>Extracted events</h4>
+                  ${extracted.map(e => `
+                    <div class="extracted-row">
+                      <div class="er-body">
+                        <div class="er-title">${escapeHtml(e.title)}</div>
+                        <div class="er-meta">${escapeHtml(e.date)} · ${escapeHtml(e.time)} · ${e.confidence} confidence</div>
+                      </div>
+                      <div class="er-actions">
+                        <button class="er-btn accept" onclick="app.openModal('Accept (stub)','Wave 4 will commit this row to Sheets + GCal.')" aria-label="Accept">${ICONS.check}</button>
+                        <button class="er-btn edit" onclick="app.openModal('Edit (stub)','Wave 4 will open an inline edit form.')" aria-label="Edit">${ICONS.penSm}</button>
+                        <button class="er-btn reject" onclick="app.openModal('Reject (stub)','Wave 4 will discard this row and remember the OCR substring for future training.')" aria-label="Reject">${ICONS.x}</button>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      // ============================================================
+      // TODAY
+      // ============================================================
+      viewToday() {
+        const date = this.state.currentDate;
+        const day = this.mockData.days.find(d => d.date === date) || { date, primary_tag: 'chill', tags: ['chill'], plan_a_summary: 'No plan yet', plan_b_pointer: 'custom', plan_b_custom_text: '', weather_sensitive: false };
+        const items = this.mockData.planItems[date] || [];
+        const d = parseISO(date);
+
+        const grouped = { shared: [], elder: [], younger: [] };
+        items.forEach(it => { if (grouped[it.kid]) grouped[it.kid].push(it); });
+
+        const renderGroup = (label, arr) => {
+          if (!arr.length) return '';
+          return `
+            <div class="kid-group">
+              <div class="kid-label">${escapeHtml(label)}</div>
+              ${arr.map(it => `
+                <div class="plan-item">
+                  <div class="time">${escapeHtml(formatTime(it.start))}</div>
+                  <div class="body">
+                    <div class="title">${escapeHtml(it.title)}</div>
+                    ${it.location ? `<div class="location">${escapeHtml(it.location)}</div>` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `;
+        };
+
+        const planBLibrary = (day.plan_b_pointer && day.plan_b_pointer !== 'custom')
+          ? this.mockData.library.find(l => l.id === day.plan_b_pointer)
+          : null;
+
+        const planBHtml = planBLibrary
+          ? `
+            <div class="plan-b-content" onclick="app.navigate('library')">
+              <div class="body">
+                <div class="name">${escapeHtml(planBLibrary.name)}</div>
+                <div class="desc">${escapeHtml(planBLibrary.description)}</div>
+              </div>
+              <div class="chevron">${ICONS.chevR}</div>
+            </div>
+          `
+          : (day.plan_b_custom_text
+              ? `<div class="plan-b-content"><div class="body"><div class="desc" style="font-size:14px; color:var(--ink);">${escapeHtml(day.plan_b_custom_text)}</div></div></div>`
+              : `<div class="plan-b-content"><div class="body"><div class="desc">No Plan B set yet.</div></div></div>`);
+
+        const otherTags = (day.tags || []).filter(t => t !== day.primary_tag);
+
+        return `
+          <main class="view">
+            <div class="today-hero ${tagClass(day.primary_tag)}">
+              <div class="today-date-row">
+                <div class="today-date">${escapeHtml(formatLongDate(d))}</div>
+                ${day.weather_sensitive ? `<div class="today-weather">${ICONS.rain} weather-sensitive</div>` : ''}
+              </div>
+              <div class="day-nav">
+                <button onclick="app.shiftDay(-1)" aria-label="Previous day">${ICONS.chevL}</button>
+                <button onclick="app.shiftDay(1)" aria-label="Next day">${ICONS.chevR}</button>
+                <button class="today-link" onclick="app.goToToday()">Jump to today</button>
+              </div>
+              <div class="tag-row">
+                <span class="tag-chip primary ${tagClass(day.primary_tag)}">${escapeHtml(tagLabel(day.primary_tag))}</span>
+                ${otherTags.map(t => `<span class="tag-chip outlined ${tagClass(t)}"><span class="swatch"></span>${escapeHtml(tagLabel(t))}</span>`).join('')}
+              </div>
+            </div>
+
+            <section class="plan-section">
+              <h3>Plan A <span class="label-pill">today</span></h3>
+              ${items.length
+                ? renderGroup('Shared', grouped.shared) + renderGroup('Henry · elementary', grouped.elder) + renderGroup('Mia · preschool', grouped.younger)
+                : `<div class="plan-item"><div class="body"><div class="title" style="color:var(--ink-soft); font-weight:400;">${escapeHtml(day.plan_a_summary || 'No items yet')}</div></div></div>`
+              }
+            </section>
+
+            <section class="plan-section">
+              <h3>Plan B <span class="label-pill b">backup</span></h3>
+              ${planBHtml}
+            </section>
+
+            <div class="cta-row">
+              <button class="btn-primary" onclick="app.stubPhotoUpload()">${ICONS.camIcon} Sync paper calendar</button>
+              <button class="btn-secondary" onclick="app.stubEdit()">${ICONS.pencil} Edit this day</button>
+            </div>
+          </main>
+        `;
+      },
+
+      // ============================================================
+      // WEEK
+      // ============================================================
+      viewWeek() {
+        const start = parseISO(this.state.weekStart);
+        const dates = Array.from({length: 7}, (_, i) => isoDate(addDays(start, i)));
+        const days = dates.map(d => {
+          const found = this.mockData.days.find(x => x.date === d);
+          return found || { date: d, primary_tag: null, tags: [], plan_a_summary: '', weather_sensitive: false, plan_b_pointer: null };
+        });
+
+        return `
+          <main class="view">
+            <div class="week-header">
+              <button class="week-nav-btn" onclick="app.shiftWeek(-1)" aria-label="Previous week">${ICONS.chevL}</button>
+              <div class="week-title">${escapeHtml(formatWeekHeader(start))}</div>
+              <button class="week-nav-btn" onclick="app.shiftWeek(1)" aria-label="Next week">${ICONS.chevR}</button>
+            </div>
+            <div class="week-sub"><a onclick="app.goToToday()" style="cursor:pointer;">Jump to today</a></div>
+
+            <div class="week-list">
+              ${days.map(day => {
+                const d = parseISO(day.date);
+                const tags = day.tags || [];
+                const indoor = tags.includes('indoor');
+                const outdoor = tags.includes('outdoor');
+                const isToday = day.date === '2026-06-16';
+                const isPlanBCustom = day.plan_b_pointer === 'custom';
+                const isPlanBLibrary = day.plan_b_pointer && day.plan_b_pointer !== 'custom';
+                return `
+                  <button class="day-row ${day.primary_tag ? tagClass(day.primary_tag) : ''} ${isToday ? 'today' : ''}" onclick="app.jumpToDay('${day.date}')">
+                    <div class="stripe"></div>
+                    <div class="day-content">
+                      <div class="date-block">
+                        <div class="dow">${DOW[d.getDay()]}</div>
+                        <div class="dom">${d.getDate()}</div>
+                      </div>
+                      <div class="summary">
+                        <div class="primary-line">${escapeHtml(day.plan_a_summary || '— no plan yet —')}</div>
+                        <div class="tag-line">${tags.map(t => escapeHtml(tagLabel(t).toLowerCase())).join(' · ') || '&nbsp;'}</div>
+                      </div>
+                      <div class="icons">
+                        ${day.weather_sensitive ? ICONS.rain : ''}
+                        ${indoor && !outdoor ? ICONS.indoor : ''}
+                        ${outdoor && !indoor ? ICONS.outdoor : ''}
+                        ${isPlanBLibrary ? ICONS.bookmarkSm : ''}
+                        ${isPlanBCustom ? ICONS.penSm : ''}
+                      </div>
+                    </div>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </main>
+        `;
+      },
+
+      // ============================================================
+      // LIBRARY
+      // ============================================================
+      viewLibrary() {
+        const filter = this.state.libraryFilter;
+        const items = filter === 'all'
+          ? this.mockData.library
+          : this.mockData.library.filter(i => i.tag === filter);
+
+        const filters = ['all', 'outdoor', 'indoor', 'chill', 'playdate', 'day-trip', 'mountains', 'errands'];
+
+        return `
+          <main class="view">
+            <h2 class="view-title">Library</h2>
+            <div class="view-sub">Fallback activities for sick days, weather flips, and "nothing to do" afternoons.</div>
+
+            <div class="filter-bar">
+              ${filters.map(f => `
+                <button class="filter-chip ${filter === f ? 'active' : ''} ${f !== 'all' ? tagClass(f) : ''}" onclick="app.setLibraryFilter('${f}')">
+                  ${f !== 'all' ? '<span class="swatch"></span>' : ''}
+                  ${escapeHtml(f === 'all' ? 'All' : tagLabel(f))}
+                </button>
+              `).join('')}
+            </div>
+
+            <div class="library-list">
+              ${items.length ? items.map(it => `
+                <div class="library-card">
+                  <div class="top">
+                    <div class="name ${tagClass(it.tag)}">
+                      <span class="swatch"></span>
+                      ${escapeHtml(it.name)}
+                    </div>
+                    <div class="meta">
+                      ${it.indoor ? ICONS.indoor : ICONS.outdoor}
+                      <span class="age-pill">${escapeHtml(it.age_fit === 'both' ? 'all ages' : it.age_fit)}</span>
+                    </div>
+                  </div>
+                  <div class="desc">${escapeHtml(it.description)}</div>
+                </div>
+              `).join('') : `<div class="empty-state">No fallbacks match this filter.</div>`}
+            </div>
+          </main>
+
+          <button class="fab" onclick="app.stubAddFallback()" aria-label="Add fallback">${ICONS.plus}</button>
+        `;
+      },
+
+      // ============================================================
+      // PHOTOS
+      // ============================================================
+      viewPhotos() {
+        const photos = [...this.mockData.photos].sort((a,b) => b.uploaded_at.localeCompare(a.uploaded_at));
+        return `
+          <main class="view">
+            <h2 class="view-title">Photos</h2>
+            <div class="view-sub">Paper-calendar snapshots. Reconciliation surfaces what we extracted.</div>
+
+            <div class="photo-list">
+              ${photos.map(p => {
+                const d = parseISO(p.date);
+                const label = `${DOW[d.getDay()]}<br>${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
+                const badge = p.status === 'reconciled'
+                  ? `<span class="badge good">${ICONS.check} Reconciled</span>`
+                  : `<span class="badge warn">Needs review</span>`;
+                return `
+                  <button class="photo-row" onclick="app.stubReconcile('${p.id}')">
+                    <div class="photo-thumb ${tagClass('chill')}">${label}</div>
+                    <div class="photo-info">
+                      <div class="photo-date">${escapeHtml(p.covers)}</div>
+                      <div class="photo-meta">Uploaded ${escapeHtml(p.uploaded_at)}</div>
+                      ${badge}
+                    </div>
+                    <div style="color:var(--ink-faint);">${ICONS.chevR}</div>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+
+            <div style="margin-top: 18px;">
+              <button class="btn-primary" onclick="app.stubPhotoUpload()">${ICONS.camIcon} Take a photo</button>
+            </div>
+          </main>
+        `;
+      },
+
+      // ============================================================
+      // SETTINGS
+      // ============================================================
+      viewSettings() {
+        const s = this.mockData.settings;
+        const tags = [...this.mockData.tags].sort((a,b) => a.display_order - b.display_order);
+
+        return `
+          <main class="view">
+            <h2 class="view-title">Settings</h2>
+            <div class="view-sub">Mocked for Wave 1. Wave 3 wires these to the GAS backend.</div>
+
+            <div class="settings-section">
+              <h3>Connected calendars</h3>
+              <div class="settings-row">
+                <span class="label">Write to (family)</span>
+                <span class="value">${escapeHtml(s.family_calendar)}</span>
+              </div>
+              ${s.read_only_calendars.map(c => `
+                <div class="settings-row">
+                  <span class="label">Read-only</span>
+                  <span class="value">${escapeHtml(c)}</span>
+                </div>
+              `).join('')}
+            </div>
+
+            <div class="settings-section">
+              <h3>Photo upload</h3>
+              <div class="settings-row">
+                <span class="label">Drive folder</span>
+                <span class="value" style="font-family: ui-monospace, Menlo, monospace; font-size: 13px;">${escapeHtml(s.photo_folder)}</span>
+              </div>
+              <div class="settings-row">
+                <span class="label">Reminder</span>
+                <span class="value">Weekday mornings + Sun PM</span>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Tags</h3>
+              ${tags.map(t => `
+                <div class="tag-mgmt ${tagClass(t.tag)}">
+                  <span class="swatch" style="background: var(--chip-color);"></span>
+                  <span class="name">${escapeHtml(tagLabel(t.tag))}</span>
+                  <span class="order">order ${t.display_order}</span>
+                </div>
+              `).join('')}
+              <button class="link-btn" onclick="app.openModal('Add tag', 'Tag management lands in Wave 3.')">+ Add tag</button>
+            </div>
+
+            <div class="settings-section">
+              <h3>About</h3>
+              <div class="settings-row">
+                <span class="label">App</span>
+                <span class="value">KidPlan</span>
+              </div>
+              <div class="settings-row">
+                <span class="label">Version</span>
+                <span class="value">${escapeHtml(s.app_version)}</span>
+              </div>
+              <div class="settings-row">
+                <span class="label">Build</span>
+                <span class="value">Wave 1 scaffold</span>
+              </div>
+            </div>
+          </main>
+        `;
+      }
+    };
+
+    // Boot
+    document.addEventListener('DOMContentLoaded', () => app.render());
+    if (document.readyState !== 'loading') app.render();
+
+    // Register service worker placeholder (no SW file yet; safe no-op).
+    // Wave 3 may add offline caching here.
+  </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Node
+node_modules/
+dist/
+
+# Env
+.env
+.env.*
+
+# clasp / Apps Script
+.clasp.json
+.clasprc.json
+
+# Editors
+.vscode/
+.idea/
