@@ -71,9 +71,17 @@ When the browser opens, sign in as `soleilandtyler@gmail.com` and approve.
 
 ## Section 6 — Create the GAS project
 
+clasp v3 (3.x) removed the `webapp` and `api` project types. Web-app vs standalone is now controlled entirely by `appsscript.json` (ours already declares the `webapp` block and OAuth scopes), so create a `standalone` project:
+
 ```
 cd /Users/tylergeddes/projects/KidPlan/gas
-clasp create --type webapp --title "KidPlan API" --rootDir .
+clasp create-script --type standalone --title "KidPlan API"
+```
+
+`clasp create-script` may overwrite the local `appsscript.json` with a bare default. It is committed, so restore ours, then push (answer "yes" if clasp asks to overwrite the remote manifest):
+
+```
+git checkout appsscript.json
 clasp push
 ```
 
@@ -107,13 +115,22 @@ In the Apps Script editor (opened in Section 6):
 
 ## Section 8 — Deploy the GAS web app
 
-From the local `gas/` directory:
+From the local `gas/` directory, create the versioned deployment once:
 
 ```
 clasp deploy --description "v0.1.0 wave-1"
 ```
 
-The output includes a deployment URL ending in `/exec`. Copy it. This is the value you will paste into the frontend in Section 10.
+The output includes a deployment ID (`AKfycb...`) and a URL ending in `/exec`. Copy the `/exec` URL for Section 10. Also save the deployment ID somewhere stable (repo README or an npm script).
+
+Important: on every later redeploy, reuse that ID with `-i` so the `/exec` URL stays constant and the Cloudflare frontend keeps working:
+
+```
+clasp push
+clasp deploy -i <DEPLOYMENT_ID>
+```
+
+A bare `clasp deploy` (no `-i`) creates a new deployment with a new URL every time, which silently breaks the frontend's `API_URL`.
 
 In the Apps Script editor, on first deploy you may be prompted to "Review permissions". Authorize as `soleilandtyler@gmail.com` and grant the scopes (Sheets, Drive, Calendar, external URL fetch).
 
