@@ -103,11 +103,14 @@ In the Apps Script editor (opened in Section 6):
 
 | Key | Value |
 |---|---|
+| `API_TOKEN` | A long random shared secret. Generate one with `openssl rand -hex 24`. You and Soleil enter this once per phone in the app (it is stored in the browser's localStorage, never committed to the repo). |
 | `SHEET_ID` | Sheet ID from Section 2 |
 | `PHOTO_FOLDER_ID` | Drive folder ID from Section 3 |
 | `FAMILY_CALENDAR_ID` | Family calendar ID from Section 4 step 4 |
 | `READ_ONLY_CALENDAR_IDS` | Comma-separated personal calendar IDs from Section 4 step 6 |
 | `VISION_SERVICE_ACCOUNT_JSON` | Paste the entire contents of the JSON key file from Section 1 step 7 as a single string |
+
+Auth model note: the web app deploys as `ANYONE_ANONYMOUS` so the Cloudflare frontend can call it cross-origin without a Google login redirect. `Session.getActiveUser()` is empty on a personal-Gmail web app, so access control is the `API_TOKEN` shared secret, not a Google-identity allowlist. The web app still runs as soleilandtyler@ (execute-as-deployer), so it reads/writes the Sheet, Calendar, and Drive owned by that account.
 
 4. Click "Save script properties".
 
@@ -163,7 +166,7 @@ In the Apps Script editor, on first deploy you may be prompted to "Review permis
 ## You're done when
 
 - (a) Opening the Pages URL on your phone shows the KidPlan home screen with real data from the Sheet.
-- (b) `?action=ping` against the GAS URL returns `{ok: true, user: "soleilandtyler@gmail.com"}`. Test by visiting `<DEPLOYMENT_URL>?action=ping` in a browser signed in as the shared account.
+- (b) `?action=ping` against the GAS URL returns `{ok: true, runningAs: "soleilandtyler@gmail.com", tokenOk: false, version: "0.1.0"}`. Test by visiting `<DEPLOYMENT_URL>?action=ping` in any browser (no login needed - it is ANYONE_ANONYMOUS). `runningAs` confirms the deploy executes as the shared account; `tokenOk` is false until you append `&token=<your API_TOKEN>`, which should flip it to true.
 
 ---
 

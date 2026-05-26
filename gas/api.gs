@@ -3,9 +3,13 @@
 
 const VERSION = '0.1.0';
 
-const ping = (_params) => ({
+// Unauthenticated. runningAs is the deployer (getEffectiveUser is reliable for
+// execute-as-me; getActiveUser is empty on a personal-Gmail web app). tokenOk
+// lets the frontend verify its stored token without exposing any data.
+const ping = (params) => ({
   ok: true,
-  user: Session.getActiveUser().getEmail(),
+  runningAs: Session.getEffectiveUser().getEmail(),
+  tokenOk: tokensMatch_(params && params.token, getApiToken_()),
   version: VERSION,
 });
 
