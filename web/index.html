@@ -817,7 +817,8 @@
       const res = await fetch(API_URL, { method: 'POST', body });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'request failed');
-      return json.data;
+      // Most actions return {ok, data}; ping returns a flat object (no data wrapper).
+      return json.data !== undefined ? json.data : json;
     }
 
     // Sheets stores booleans as TRUE/FALSE strings; normalize to JS booleans.
