@@ -802,8 +802,36 @@
   <script>
     'use strict';
 
-    // Wave 3 will replace this with the real GAS web-app deployment URL.
-    const API_URL = '__SET_AFTER_DEPLOY__';
+    // Live GAS web-app deployment. No token here - it lives only in localStorage.
+    const API_URL = 'https://script.google.com/macros/s/AKfycbxJ7oc6WazWnkr0YLrE9S-2c4w04Xz6K4bRgx276EkJPYJN3Z48lnO56QeF9Hlm02ye/exec';
+    const TOKEN_KEY = 'kidplan_token';
+
+    function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+    function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+    function clearToken() { localStorage.removeItem(TOKEN_KEY); }
+
+    // Real API call. POSTs text/plain JSON to dodge a CORS preflight GAS cannot answer.
+    // Injects the stored token; returns data or throws on ok:false / network error.
+    async function apiCall(action, params) {
+      const body = JSON.stringify(Object.assign({ action, token: getToken() }, params || {}));
+      const res = await fetch(API_URL, { method: 'POST', body });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'request failed');
+      return json.data;
+    }
+
+    // Sheets stores booleans as TRUE/FALSE strings; normalize to JS booleans.
+    function asBool(v) {
+      if (v === true || v === false) return v;
+      if (v === null || v === undefined || v === '') return false;
+      return String(v).toUpperCase() === 'TRUE';
+    }
+    // Days.tags is a comma-separated string; split into a clean array.
+    function splitTags(s) {
+      if (Array.isArray(s)) return s.filter(Boolean);
+      if (!s) return [];
+      return String(s).split(',').map(t => t.trim()).filter(Boolean);
+    }
 
     // ============================================================
     // Helpers
@@ -861,17 +889,27 @@
     function tagClass(tag) {
       return 'c-' + (tag || '').toLowerCase().replace(/\s+/g, '-');
     }
+    // Title-case a hyphenated/spaced tag value for display.
     function tagLabel(tag) {
-      const map = {
-        'indoor': 'Indoor',
-        'outdoor': 'Outdoor',
-        'day-trip': 'Day Trip',
-        'mountains': 'Mountains',
-        'playdate': 'Playdate',
-        'chill': 'Chill',
-        'errands': 'Errands'
-      };
-      return map[tag] || tag;
+      if (!tag) return '';
+      return String(tag).replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+    // Inject a <style> mapping each loaded tag's color onto its .c-<tag> class.
+    // Lets user-added tags get stripe/chip colors without hardcoded CSS vars.
+    function applyTagColors(tags) {
+      let css = '';
+      (tags || []).forEach(t => {
+        if (!t.tag || !t.color) return;
+        const cls = tagClass(t.tag);
+        css += `.${cls}{--chip-color:${t.color};--row-color:${t.color};--primary-tag-color:${t.color};}\n`;
+      });
+      let el = document.getElementById('tag-colors');
+      if (!el) {
+        el = document.createElement('style');
+        el.id = 'tag-colors';
+        document.head.appendChild(el);
+      }
+      el.textContent = css;
     }
 
     // ============================================================
@@ -908,7 +946,8 @@
     };
 
     // ============================================================
-    // Mock data (Wave 1 only — Wave 3 swaps fetchMock for real fetch)
+    // Mock data kept ONLY as a typed reference (not rendered). Live data
+    // comes from the GAS API via apiCall(). See app.data for the live cache.
     // ============================================================
     const MOCK_DAYS = [
       { date: '2026-06-15', primary_tag: 'chill', tags: ['chill','indoor'], plan_a_summary: 'Slow morning, library trip, sprinkler in the yard', plan_b_pointer: 'lib-craft-1', plan_b_custom_text: '', weather_sensitive: false, confidence: 'planned' },
@@ -990,13 +1029,20 @@
     // ============================================================
     const app = {
       state: {
+        booted: false,
+        needsToken: false,
+        tokenError: '',
         currentView: 'today',
-        currentDate: '2026-06-16', // pinned within mock range so the view is rich on first load
-        weekStart: '2026-06-15',
+        currentDate: isoDate(new Date()), // real today
+        weekStart: isoDate(startOfWeek(new Date())),
         libraryFilter: 'all',
-        modal: null
+        modal: null,
+        // per-view async status: 'loading' | 'ready' | 'error'
+        loading: false,
+        error: ''
       },
 
+      // Typed reference only; views never read this.
       mockData: {
         days: MOCK_DAYS,
         planItems: MOCK_PLAN_ITEMS,
@@ -1006,61 +1052,136 @@
         settings: MOCK_SETTINGS
       },
 
-      // Wave 3 will swap this for `fetch(API_URL + '?action=' + action, ...)`
-      fetchMock(action, params) {
-        params = params || {};
-        switch (action) {
-          case 'getDay': {
-            const day = this.mockData.days.find(d => d.date === params.date) || null;
-            const items = this.mockData.planItems[params.date] || [];
-            return Promise.resolve({ day, items });
-          }
-          case 'getWeek': {
-            const start = parseISO(params.weekStart);
-            const dates = Array.from({length: 7}, (_, i) => isoDate(addDays(start, i)));
-            const days = dates.map(d => this.mockData.days.find(x => x.date === d) || { date: d, primary_tag: null, tags: [], plan_a_summary: '', weather_sensitive: false });
-            return Promise.resolve({ days });
-          }
-          case 'getLibrary':
-            return Promise.resolve({ items: this.mockData.library });
-          case 'getPhotos':
-            return Promise.resolve({ photos: this.mockData.photos });
-          case 'getSettings':
-            return Promise.resolve({ settings: this.mockData.settings, tags: this.mockData.tags });
-          default:
-            return Promise.resolve({});
-        }
+      // Live data cache, populated by loadView().
+      data: {
+        tags: [],
+        day: null,
+        items: [],
+        weekDays: [],
+        library: [],
+        settings: null
       },
+
+      // ============================================================
+      // Boot + token gate
+      // ============================================================
+      async boot() {
+        if (!getToken()) {
+          this.state.needsToken = true;
+          this.render();
+          return;
+        }
+        // Verify the stored token before showing the app.
+        try {
+          const data = await apiCall('ping', {});
+          if (!data || data.tokenOk !== true) {
+            this.state.needsToken = true;
+            this.state.tokenError = 'That token did not match. Try again.';
+            clearToken();
+            this.render();
+            return;
+          }
+        } catch (e) {
+          // Network failure during verify - let them in but views show retry.
+          this.state.needsToken = false;
+        }
+        this.state.needsToken = false;
+        this.state.booted = true;
+        await this.loadView();
+      },
+
+      async saveTokenFromInput() {
+        const input = document.getElementById('tokenInput');
+        const val = (input && input.value || '').trim();
+        if (!val) return;
+        setToken(val);
+        this.state.tokenError = '';
+        this.state.needsToken = false;
+        await this.boot();
+      },
+
+      changeToken() {
+        clearToken();
+        this.state.booted = false;
+        this.state.needsToken = true;
+        this.state.tokenError = '';
+        this.render();
+      },
+
+      // ============================================================
+      // Data loading (with loading + error states)
+      // ============================================================
+      async ensureTags() {
+        if (this.data.tags.length) return;
+        this.data.tags = await apiCall('list_tags', {});
+        applyTagColors(this.data.tags);
+      },
+
+      async loadView() {
+        this.state.loading = true;
+        this.state.error = '';
+        this.render();
+        try {
+          await this.ensureTags();
+          const v = this.state.currentView;
+          if (v === 'today') {
+            const date = this.state.currentDate;
+            // Library is needed for Plan B labels and the day editor dropdown.
+            const [days, items, library] = await Promise.all([
+              apiCall('list_days', { start: date, end: date }),
+              apiCall('list_plan_items', { date }),
+              apiCall('list_library', {})
+            ]);
+            this.data.day = (days && days[0]) || null;
+            this.data.items = items || [];
+            this.data.library = library || [];
+          } else if (v === 'week') {
+            const start = parseISO(this.state.weekStart);
+            const end = isoDate(addDays(start, 6));
+            this.data.weekDays = await apiCall('list_days', { start: this.state.weekStart, end });
+          } else if (v === 'library') {
+            this.data.library = await apiCall('list_library', {});
+          } else if (v === 'settings') {
+            this.data.settings = await apiCall('get_settings', {});
+          }
+          this.state.loading = false;
+        } catch (e) {
+          this.state.loading = false;
+          this.state.error = e.message || 'Something went wrong';
+        }
+        this.render();
+      },
+
+      retry() { this.loadView(); },
 
       navigate(view, params) {
         this.state.currentView = view;
         if (params) Object.assign(this.state, params);
-        this.render();
+        this.loadView();
       },
 
       jumpToDay(date) {
         this.state.currentDate = date;
         this.state.currentView = 'today';
-        this.render();
+        this.loadView();
       },
 
       shiftDay(delta) {
         const d = parseISO(this.state.currentDate);
         this.state.currentDate = isoDate(addDays(d, delta));
-        this.render();
+        this.loadView();
       },
 
       shiftWeek(delta) {
         const d = parseISO(this.state.weekStart);
         this.state.weekStart = isoDate(addDays(d, delta * 7));
-        this.render();
+        this.loadView();
       },
 
       goToToday() {
-        // "Today" for mocked data = pinned reference day in June 2026.
-        this.state.currentDate = '2026-06-16';
-        this.state.weekStart = '2026-06-15';
-        this.render();
+        this.state.currentDate = isoDate(new Date());
+        this.state.weekStart = isoDate(startOfWeek(new Date()));
+        this.loadView();
       },
 
       setLibraryFilter(tag) {
@@ -1068,8 +1189,8 @@
         this.render();
       },
 
-      openModal(title, body) {
-        this.state.modal = { title, body };
+      openModal(modal) {
+        this.state.modal = modal;
         this.render();
       },
 
@@ -1078,23 +1199,8 @@
         this.render();
       },
 
-      stubEdit() {
-        this.openModal('Edit day', 'Editing days lands in Wave 3. For now this is a tap-target placeholder so the flow feels real.');
-      },
-
       stubPhotoUpload() {
-        this.openModal('Sync paper calendar', 'Camera capture and OCR reconciliation land in Wave 4. Tap a photo on the Photos tab to preview the reconciliation diff UI.');
-      },
-
-      stubAddFallback() {
-        this.openModal('Add fallback', 'Library editing lands in Wave 3. Wave 1 ships read-only library data.');
-      },
-
-      stubReconcile(photoId) {
-        const photo = this.mockData.photos.find(p => p.id === photoId);
-        if (!photo) return;
-        this.state.modal = { title: 'reconcile', photoId };
-        this.render();
+        this.openModal({ kind: 'info', title: 'Sync paper calendar', body: 'Camera capture and OCR reconciliation land in Wave 4.' });
       },
 
       // ============================================================
@@ -1102,21 +1208,40 @@
       // ============================================================
       render() {
         const root = document.getElementById('root');
-        let view;
-        switch (this.state.currentView) {
-          case 'today':    view = this.viewToday(); break;
-          case 'week':     view = this.viewWeek(); break;
-          case 'library':  view = this.viewLibrary(); break;
-          case 'photos':   view = this.viewPhotos(); break;
-          case 'settings': view = this.viewSettings(); break;
-          default:         view = this.viewToday();
+        const nav = document.getElementById('bottomNav');
+
+        // Token onboarding gate - no app chrome, no nav.
+        if (this.state.needsToken) {
+          nav.innerHTML = '';
+          root.innerHTML = this.viewTokenGate();
+          window.scrollTo(0, 0);
+          const input = document.getElementById('tokenInput');
+          if (input) input.focus();
+          return;
         }
 
+        let view;
+        if (this.state.loading) {
+          view = this.viewLoading();
+        } else if (this.state.error) {
+          view = this.viewError();
+        } else {
+          switch (this.state.currentView) {
+            case 'today':    view = this.viewToday(); break;
+            case 'week':     view = this.viewWeek(); break;
+            case 'library':  view = this.viewLibrary(); break;
+            case 'photos':   view = this.viewPhotos(); break;
+            case 'settings': view = this.viewSettings(); break;
+            default:         view = this.viewToday();
+          }
+        }
+
+        const canEditDay = this.state.currentView === 'today' && !this.state.loading && !this.state.error;
         root.innerHTML = `
           <header class="app-header">
             <div class="brand"><span class="dot"></span>KidPlan</div>
             <div class="header-actions">
-              <button class="icon-btn" onclick="app.stubEdit()" aria-label="Edit">${ICONS.pencil}</button>
+              ${canEditDay ? `<button class="icon-btn" onclick="app.openDayEditor()" aria-label="Edit day">${ICONS.pencil}</button>` : ''}
             </div>
           </header>
           ${view}
@@ -1125,6 +1250,40 @@
 
         this.renderNav();
         window.scrollTo(0, 0);
+      },
+
+      viewTokenGate() {
+        return `
+          <main class="view" style="max-width:380px; margin:0 auto; padding-top:14vh;">
+            <div class="brand" style="font-family:var(--font-display); font-weight:600; font-size:30px; margin-bottom:6px;">
+              <span class="dot" style="display:inline-block;width:11px;height:11px;border-radius:50%;background:var(--accent);margin-right:9px;"></span>KidPlan
+            </div>
+            <div class="view-sub" style="margin-bottom:22px;">Enter your access token to connect.</div>
+            <div class="plan-section">
+              <input id="tokenInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"
+                placeholder="Access token"
+                style="width:100%; padding:14px; border:1px solid var(--ink-faint); border-radius:var(--radius); font-size:15px; background:var(--surface); margin-bottom:12px;"
+                onkeydown="if(event.key==='Enter') app.saveTokenFromInput()">
+              ${this.state.tokenError ? `<div style="color:var(--warn); font-size:13px; margin-bottom:12px;">${escapeHtml(this.state.tokenError)}</div>` : ''}
+              <button class="btn-primary" onclick="app.saveTokenFromInput()">Save and connect</button>
+            </div>
+          </main>
+        `;
+      },
+
+      viewLoading() {
+        return `<main class="view"><div class="empty-state">Loading…</div></main>`;
+      },
+
+      viewError() {
+        return `
+          <main class="view">
+            <div class="empty-state">
+              <div style="margin-bottom:14px;">Could not reach KidPlan.<br><span style="font-size:13px;">${escapeHtml(this.state.error)}</span></div>
+              <button class="btn-secondary" style="max-width:200px;margin:0 auto;" onclick="app.retry()">Try again</button>
+            </div>
+          </main>
+        `;
       },
 
       renderNav() {
@@ -1152,64 +1311,363 @@
       renderModal() {
         const m = this.state.modal;
         if (!m) return '';
-        if (m.title === 'reconcile') {
-          return this.renderReconcileModal(m.photoId);
+        let inner;
+        switch (m.kind) {
+          case 'dayEditor': inner = this.renderDayEditor(m); break;
+          case 'planItem':  inner = this.renderPlanItemEditor(m); break;
+          case 'duplicate': inner = this.renderDuplicateEditor(m); break;
+          case 'library':   inner = this.renderLibraryEditor(m); break;
+          case 'tag':       inner = this.renderTagEditor(m); break;
+          default:          inner = this.renderInfoModal(m); break;
         }
         return `
           <div class="modal-backdrop" onclick="if(event.target===this) app.closeModal()">
-            <div class="modal">
-              <h3>${escapeHtml(m.title)}</h3>
-              <p>${escapeHtml(m.body)}</p>
-              <button class="modal-close" onclick="app.closeModal()">Got it</button>
+            <div class="modal" style="max-height:90vh; overflow-y:auto;">
+              ${inner}
             </div>
           </div>
         `;
       },
 
-      renderReconcileModal(photoId) {
-        const photo = this.mockData.photos.find(p => p.id === photoId);
-        if (!photo) return '';
-        const ocr = photo.ocr_preview || 'MON 15\n  Henry camp 9-3\n  reservoir after\nTUE 16\n  Brainard hike\n  picnic\nWED 17\n  Eleanor bday 2pm\n  Foothills';
-        const extracted = [
-          { date: 'Mon Jun 15', title: 'Henry camp', time: '9:00 - 3:00pm', confidence: 'high' },
-          { date: 'Mon Jun 15', title: 'Boulder Reservoir', time: 'afternoon', confidence: 'med' },
-          { date: 'Tue Jun 16', title: 'Brainard Lake hike', time: 'morning', confidence: 'high' },
-          { date: 'Wed Jun 17', title: "Eleanor's birthday", time: '2:00pm', confidence: 'high' },
-          { date: 'Wed Jun 17', title: 'Foothills Park', time: 'after party', confidence: 'low' }
-        ];
+      renderInfoModal(m) {
         return `
-          <div class="modal-backdrop" onclick="if(event.target===this) app.closeModal()">
-            <div class="modal" style="border-radius: 22px 22px 0 0; max-height: 90vh; overflow-y: auto;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                <h3 style="margin:0;">Reconcile photo</h3>
-                <button class="icon-btn" onclick="app.closeModal()" aria-label="Close">${ICONS.x}</button>
-              </div>
-              <p style="margin-bottom:14px;">Uploaded ${escapeHtml(photo.uploaded_at)} · covers ${escapeHtml(photo.covers)}</p>
-              <div class="diff-grid">
-                <div class="diff-panel">
-                  <h4>Raw OCR</h4>
-                  <div class="diff-ocr">${escapeHtml(ocr)}</div>
-                </div>
-                <div class="diff-panel">
-                  <h4>Extracted events</h4>
-                  ${extracted.map(e => `
-                    <div class="extracted-row">
-                      <div class="er-body">
-                        <div class="er-title">${escapeHtml(e.title)}</div>
-                        <div class="er-meta">${escapeHtml(e.date)} · ${escapeHtml(e.time)} · ${e.confidence} confidence</div>
-                      </div>
-                      <div class="er-actions">
-                        <button class="er-btn accept" onclick="app.openModal('Accept (stub)','Wave 4 will commit this row to Sheets + GCal.')" aria-label="Accept">${ICONS.check}</button>
-                        <button class="er-btn edit" onclick="app.openModal('Edit (stub)','Wave 4 will open an inline edit form.')" aria-label="Edit">${ICONS.penSm}</button>
-                        <button class="er-btn reject" onclick="app.openModal('Reject (stub)','Wave 4 will discard this row and remember the OCR substring for future training.')" aria-label="Reject">${ICONS.x}</button>
-                      </div>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            </div>
+          <h3>${escapeHtml(m.title)}</h3>
+          <p>${escapeHtml(m.body)}</p>
+          <button class="modal-close" onclick="app.closeModal()">Got it</button>
+        `;
+      },
+
+      // Reusable bits for editor modals.
+      tagOptions(selected) {
+        return this.data.tags.map(t =>
+          `<option value="${escapeHtml(t.tag)}" ${t.tag === selected ? 'selected' : ''}>${escapeHtml(tagLabel(t.tag))}</option>`
+        ).join('');
+      },
+
+      modalHeader(title) {
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 style="margin:0;">${escapeHtml(title)}</h3>
+            <button class="icon-btn" onclick="app.closeModal()" aria-label="Close">${ICONS.x}</button>
           </div>
         `;
+      },
+
+      // ---------- Day editor ----------
+      openDayEditor() {
+        const date = this.state.currentDate;
+        const day = this.data.day || { date, primary_tag: this.data.tags[0] ? this.data.tags[0].tag : '', tags: '', plan_b_pointer: 'custom', plan_b_custom_text: '', notes: '', confidence: 'planned', weather_sensitive: false };
+        this.openModal({ kind: 'dayEditor', day });
+      },
+
+      renderDayEditor(m) {
+        const day = m.day;
+        const secondary = splitTags(day.tags).filter(t => t !== day.primary_tag);
+        const pointer = day.plan_b_pointer || 'custom';
+        const libOpts = (this.data.library || []).map(l =>
+          `<option value="${escapeHtml(l.id)}" ${pointer === l.id ? 'selected' : ''}>${escapeHtml(l.name)}</option>`).join('');
+        const fld = 'margin-bottom:14px;';
+        const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
+        const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
+        return `
+          ${this.modalHeader('Edit ' + formatLongDate(parseISO(day.date)))}
+          <div style="${fld}">
+            <label style="${lbl}">Primary tag</label>
+            <select id="de_primary" style="${inp}">${this.tagOptions(day.primary_tag)}</select>
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Secondary tags</label>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              ${this.data.tags.map(t => {
+                if (t.tag === day.primary_tag) return '';
+                const on = secondary.includes(t.tag);
+                return `<button type="button" id="de_sec_${escapeHtml(t.tag)}" class="tag-chip ${on ? 'primary' : 'outlined'} ${tagClass(t.tag)}" data-on="${on ? '1' : '0'}" onclick="app.toggleSecondaryTag('${escapeHtml(t.tag)}')">${escapeHtml(tagLabel(t.tag))}</button>`;
+              }).join('')}
+            </div>
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Plan A summary</label>
+            <input id="de_summary" style="${inp}" value="${escapeHtml(day.plan_a_summary || '')}" placeholder="The day's main plan">
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Plan B</label>
+            <select id="de_pointer" style="${inp} margin-bottom:8px;" onchange="document.getElementById('de_custom').style.display = this.value==='custom' ? 'block':'none'">
+              <option value="custom" ${pointer === 'custom' ? 'selected' : ''}>Custom text…</option>
+              ${libOpts}
+            </select>
+            <textarea id="de_custom" rows="2" style="${inp} display:${pointer === 'custom' ? 'block' : 'none'};" placeholder="Custom Plan B">${escapeHtml(day.plan_b_custom_text || '')}</textarea>
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Notes</label>
+            <textarea id="de_notes" rows="2" style="${inp}" placeholder="Gear, who's driving…">${escapeHtml(day.notes || '')}</textarea>
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Confidence</label>
+            <select id="de_conf" style="${inp}">
+              ${['planned','tentative','locked'].map(c => `<option value="${c}" ${day.confidence === c ? 'selected' : ''}>${tagLabel(c)}</option>`).join('')}
+            </select>
+          </div>
+          <label style="display:flex; align-items:center; gap:10px; ${fld} font-size:14px;">
+            <input type="checkbox" id="de_weather" ${asBool(day.weather_sensitive) ? 'checked' : ''} style="width:18px;height:18px;">
+            Weather-sensitive
+          </label>
+          <button class="btn-primary" onclick="app.saveDay()">Save day</button>
+        `;
+      },
+
+      toggleSecondaryTag(tag) {
+        const btn = document.getElementById('de_sec_' + tag);
+        if (!btn) return;
+        const on = btn.getAttribute('data-on') === '1';
+        btn.setAttribute('data-on', on ? '0' : '1');
+        btn.className = 'tag-chip ' + (on ? 'outlined' : 'primary') + ' ' + tagClass(tag);
+      },
+
+      async saveDay() {
+        const primary = document.getElementById('de_primary').value;
+        const secondary = this.data.tags
+          .map(t => t.tag)
+          .filter(t => t !== primary && document.getElementById('de_sec_' + t) && document.getElementById('de_sec_' + t).getAttribute('data-on') === '1');
+        const allTags = [primary].concat(secondary);
+        const pointer = document.getElementById('de_pointer').value;
+        const params = {
+          date: this.state.modal.day.date,
+          primary_tag: primary,
+          tags: allTags.join(','),
+          plan_a_summary: document.getElementById('de_summary').value,
+          plan_b_pointer: pointer,
+          plan_b_custom_text: pointer === 'custom' ? document.getElementById('de_custom').value : '',
+          notes: document.getElementById('de_notes').value,
+          confidence: document.getElementById('de_conf').value,
+          weather_sensitive: document.getElementById('de_weather').checked ? 'TRUE' : 'FALSE'
+        };
+        try {
+          this.data.day = await apiCall('upsert_day', params);
+          this.closeModal();
+          this.loadView();
+        } catch (e) {
+          alert('Could not save: ' + e.message);
+        }
+      },
+
+      // ---------- Plan item editor ----------
+      openPlanItem(id) {
+        let item;
+        if (id) {
+          item = (this.data.items || []).find(it => it.id === id) || null;
+        }
+        if (!item) item = { id: '', date: this.state.currentDate, kid: 'shared', title: '', start_time: '', end_time: '', location: '', tag: '' };
+        this.openModal({ kind: 'planItem', item });
+      },
+
+      renderPlanItemEditor(m) {
+        const it = m.item;
+        const fld = 'margin-bottom:14px;';
+        const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
+        const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
+        const lanes = [['shared','Shared'],['elder','Elder'],['younger','Younger']];
+        return `
+          ${this.modalHeader(it.id ? 'Edit item' : 'Add item')}
+          <div style="${fld}">
+            <label style="${lbl}">Lane</label>
+            <select id="pi_kid" style="${inp}">
+              ${lanes.map(([v,l]) => `<option value="${v}" ${it.kid === v ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Title</label>
+            <input id="pi_title" style="${inp}" value="${escapeHtml(it.title || '')}" placeholder="What's happening">
+          </div>
+          <div style="display:flex; gap:10px; ${fld}">
+            <div style="flex:1;"><label style="${lbl}">Start</label><input id="pi_start" type="time" style="${inp}" value="${escapeHtml(it.start_time || '')}"></div>
+            <div style="flex:1;"><label style="${lbl}">End</label><input id="pi_end" type="time" style="${inp}" value="${escapeHtml(it.end_time || '')}"></div>
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Location</label>
+            <input id="pi_loc" style="${inp}" value="${escapeHtml(it.location || '')}" placeholder="Optional">
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Tag</label>
+            <select id="pi_tag" style="${inp}"><option value="">(use day's tag)</option>${this.tagOptions(it.tag)}</select>
+          </div>
+          <button class="btn-primary" onclick="app.savePlanItem()">Save item</button>
+          ${it.id ? `<button class="btn-secondary" style="margin-top:10px; color:var(--warn);" onclick="app.deletePlanItem('${escapeHtml(it.id)}')">Delete item</button>` : ''}
+        `;
+      },
+
+      async savePlanItem() {
+        const it = this.state.modal.item;
+        const title = document.getElementById('pi_title').value.trim();
+        if (!title) { alert('Title is required'); return; }
+        const params = {
+          date: it.date,
+          kid: document.getElementById('pi_kid').value,
+          title,
+          start_time: document.getElementById('pi_start').value,
+          end_time: document.getElementById('pi_end').value,
+          location: document.getElementById('pi_loc').value,
+          tag: document.getElementById('pi_tag').value
+        };
+        if (it.id) params.id = it.id;
+        try {
+          await apiCall('upsert_plan_item', params);
+          this.closeModal();
+          this.loadView();
+        } catch (e) {
+          alert('Could not save: ' + e.message);
+        }
+      },
+
+      async deletePlanItem(id) {
+        // Optimistic: drop locally and re-render, then confirm with server.
+        const prev = this.data.items;
+        this.data.items = prev.filter(it => it.id !== id);
+        this.closeModal();
+        this.render();
+        try {
+          await apiCall('delete_plan_item', { id });
+          this.loadView();
+        } catch (e) {
+          this.data.items = prev;
+          this.render();
+          alert('Could not delete: ' + e.message);
+        }
+      },
+
+      // ---------- Duplicate day to range ----------
+      openDuplicate() {
+        this.openModal({ kind: 'duplicate' });
+      },
+
+      renderDuplicateEditor() {
+        const start = this.state.currentDate;
+        const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
+        const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
+        return `
+          ${this.modalHeader('Copy day to a range')}
+          <p style="margin-bottom:14px;">Copies ${escapeHtml(formatLongDate(parseISO(start)))} (plan + items) onto every date in the range.</p>
+          <div style="display:flex; gap:10px; margin-bottom:14px;">
+            <div style="flex:1;"><label style="${lbl}">From</label><input id="dup_start" type="date" style="${inp}" value="${escapeHtml(start)}"></div>
+            <div style="flex:1;"><label style="${lbl}">To</label><input id="dup_end" type="date" style="${inp}" value="${escapeHtml(start)}"></div>
+          </div>
+          <button class="btn-primary" onclick="app.runDuplicate()">Copy</button>
+        `;
+      },
+
+      async runDuplicate() {
+        const params = {
+          source_date: this.state.currentDate,
+          range_start: document.getElementById('dup_start').value,
+          range_end: document.getElementById('dup_end').value
+        };
+        try {
+          const res = await apiCall('duplicate_day_to_range', params);
+          this.openModal({ kind: 'info', title: 'Copied', body: `${res.days_created} day(s) and ${res.plan_items_created} item(s) created.` });
+        } catch (e) {
+          alert('Could not copy: ' + e.message);
+        }
+      },
+
+      // ---------- Library editor ----------
+      openLibraryEditor(id) {
+        let item = id ? (this.data.library || []).find(l => l.id === id) : null;
+        if (!item) item = { id: '', name: '', tag: this.data.tags[0] ? this.data.tags[0].tag : '', description: '', indoor: true, typical_duration_min: '', kid_age_fit: 'both', notes: '' };
+        this.openModal({ kind: 'library', item });
+      },
+
+      renderLibraryEditor(m) {
+        const it = m.item;
+        const fld = 'margin-bottom:14px;';
+        const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
+        const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
+        return `
+          ${this.modalHeader(it.id ? 'Edit fallback' : 'Add fallback')}
+          <div style="${fld}"><label style="${lbl}">Name</label><input id="lib_name" style="${inp}" value="${escapeHtml(it.name || '')}"></div>
+          <div style="${fld}"><label style="${lbl}">Tag</label><select id="lib_tag" style="${inp}">${this.tagOptions(it.tag)}</select></div>
+          <div style="${fld}"><label style="${lbl}">Description</label><textarea id="lib_desc" rows="2" style="${inp}">${escapeHtml(it.description || '')}</textarea></div>
+          <div style="display:flex; gap:10px; ${fld}">
+            <div style="flex:1;"><label style="${lbl}">Duration (min)</label><input id="lib_dur" type="number" style="${inp}" value="${escapeHtml(it.typical_duration_min || '')}"></div>
+            <div style="flex:1;"><label style="${lbl}">Age fit</label><select id="lib_age" style="${inp}">${['any','young','older','both'].map(a => `<option value="${a}" ${it.kid_age_fit === a ? 'selected' : ''}>${tagLabel(a)}</option>`).join('')}</select></div>
+          </div>
+          <label style="display:flex; align-items:center; gap:10px; ${fld} font-size:14px;">
+            <input type="checkbox" id="lib_indoor" ${asBool(it.indoor) ? 'checked' : ''} style="width:18px;height:18px;"> Indoor
+          </label>
+          <div style="${fld}"><label style="${lbl}">Notes</label><textarea id="lib_notes" rows="2" style="${inp}">${escapeHtml(it.notes || '')}</textarea></div>
+          <button class="btn-primary" onclick="app.saveLibrary()">Save</button>
+          ${it.id ? `<button class="btn-secondary" style="margin-top:10px; color:var(--warn);" onclick="app.deleteLibrary('${escapeHtml(it.id)}')">Delete</button>` : ''}
+        `;
+      },
+
+      async saveLibrary() {
+        const it = this.state.modal.item;
+        const name = document.getElementById('lib_name').value.trim();
+        if (!name) { alert('Name is required'); return; }
+        const params = {
+          name,
+          tag: document.getElementById('lib_tag').value,
+          description: document.getElementById('lib_desc').value,
+          typical_duration_min: document.getElementById('lib_dur').value,
+          kid_age_fit: document.getElementById('lib_age').value,
+          indoor: document.getElementById('lib_indoor').checked ? 'TRUE' : 'FALSE',
+          notes: document.getElementById('lib_notes').value
+        };
+        if (it.id) params.id = it.id;
+        try {
+          await apiCall('upsert_library', params);
+          this.closeModal();
+          this.loadView();
+        } catch (e) {
+          alert('Could not save: ' + e.message);
+        }
+      },
+
+      async deleteLibrary(id) {
+        try {
+          await apiCall('delete_library', { id });
+          this.closeModal();
+          this.loadView();
+        } catch (e) {
+          alert('Could not delete: ' + e.message);
+        }
+      },
+
+      // ---------- Tag editor ----------
+      openTagEditor(tag) {
+        let item = tag ? (this.data.tags || []).find(t => t.tag === tag) : null;
+        if (!item) item = { tag: '', color: '#B8A6D9', display_order: (this.data.tags.length + 1) };
+        this.openModal({ kind: 'tag', item });
+      },
+
+      renderTagEditor(m) {
+        const it = m.item;
+        const fld = 'margin-bottom:14px;';
+        const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
+        const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
+        return `
+          ${this.modalHeader(it.tag ? 'Edit tag' : 'Add tag')}
+          <div style="${fld}"><label style="${lbl}">Tag (lowercase)</label><input id="tag_name" style="${inp}" value="${escapeHtml(it.tag || '')}" ${it.tag ? 'readonly' : ''} placeholder="e.g. beach-day"></div>
+          <div style="${fld}"><label style="${lbl}">Color</label><input id="tag_color" type="color" style="width:60px; height:40px; border:none; background:none;" value="${escapeHtml(it.color || '#B8A6D9')}"></div>
+          <div style="${fld}"><label style="${lbl}">Display order</label><input id="tag_order" type="number" style="${inp}" value="${escapeHtml(it.display_order || '')}"></div>
+          <button class="btn-primary" onclick="app.saveTag()">Save tag</button>
+        `;
+      },
+
+      async saveTag() {
+        const tag = document.getElementById('tag_name').value.trim().toLowerCase();
+        if (!tag) { alert('Tag is required'); return; }
+        const params = {
+          tag,
+          color: document.getElementById('tag_color').value,
+          display_order: document.getElementById('tag_order').value
+        };
+        try {
+          await apiCall('upsert_tag', params);
+          this.data.tags = [];
+          this.closeModal();
+          this.loadView();
+        } catch (e) {
+          alert('Could not save: ' + e.message);
+        }
       },
 
       // ============================================================
@@ -1217,57 +1675,77 @@
       // ============================================================
       viewToday() {
         const date = this.state.currentDate;
-        const day = this.mockData.days.find(d => d.date === date) || { date, primary_tag: 'chill', tags: ['chill'], plan_a_summary: 'No plan yet', plan_b_pointer: 'custom', plan_b_custom_text: '', weather_sensitive: false };
-        const items = this.mockData.planItems[date] || [];
+        const day = this.data.day;
+        const items = this.data.items || [];
         const d = parseISO(date);
+
+        // No plan saved for this date yet.
+        if (!day) {
+          return `
+            <main class="view">
+              <div class="today-hero">
+                <div class="today-date-row"><div class="today-date">${escapeHtml(formatLongDate(d))}</div></div>
+                <div class="day-nav">
+                  <button onclick="app.shiftDay(-1)" aria-label="Previous day">${ICONS.chevL}</button>
+                  <button onclick="app.shiftDay(1)" aria-label="Next day">${ICONS.chevR}</button>
+                  <button class="today-link" onclick="app.goToToday()">Jump to today</button>
+                </div>
+              </div>
+              <div class="empty-state">
+                <div style="margin-bottom:14px;">No plan yet — add one.</div>
+                <button class="btn-secondary" style="max-width:200px;margin:0 auto;" onclick="app.openDayEditor()">${ICONS.pencil} Add a plan</button>
+              </div>
+            </main>
+          `;
+        }
 
         const grouped = { shared: [], elder: [], younger: [] };
         items.forEach(it => { if (grouped[it.kid]) grouped[it.kid].push(it); });
+        Object.keys(grouped).forEach(k => grouped[k].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || '')));
 
+        const renderItem = (it) => `
+          <button class="plan-item" style="width:100%;text-align:left;background:none;" onclick="app.openPlanItem('${escapeHtml(it.id)}')">
+            <div class="time">${escapeHtml(formatTime(it.start_time))}</div>
+            <div class="body">
+              <div class="title">${escapeHtml(it.title)}</div>
+              ${it.location ? `<div class="location">${escapeHtml(it.location)}</div>` : ''}
+            </div>
+          </button>
+        `;
         const renderGroup = (label, arr) => {
           if (!arr.length) return '';
-          return `
-            <div class="kid-group">
-              <div class="kid-label">${escapeHtml(label)}</div>
-              ${arr.map(it => `
-                <div class="plan-item">
-                  <div class="time">${escapeHtml(formatTime(it.start))}</div>
-                  <div class="body">
-                    <div class="title">${escapeHtml(it.title)}</div>
-                    ${it.location ? `<div class="location">${escapeHtml(it.location)}</div>` : ''}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          `;
+          return `<div class="kid-group"><div class="kid-label">${escapeHtml(label)}</div>${arr.map(renderItem).join('')}</div>`;
         };
 
         const planBLibrary = (day.plan_b_pointer && day.plan_b_pointer !== 'custom')
-          ? this.mockData.library.find(l => l.id === day.plan_b_pointer)
+          ? (this.data.library || []).find(l => l.id === day.plan_b_pointer)
           : null;
 
-        const planBHtml = planBLibrary
-          ? `
+        let planBHtml;
+        if (planBLibrary) {
+          planBHtml = `
             <div class="plan-b-content" onclick="app.navigate('library')">
-              <div class="body">
-                <div class="name">${escapeHtml(planBLibrary.name)}</div>
-                <div class="desc">${escapeHtml(planBLibrary.description)}</div>
-              </div>
+              <div class="body"><div class="name">${escapeHtml(planBLibrary.name)}</div><div class="desc">${escapeHtml(planBLibrary.description)}</div></div>
               <div class="chevron">${ICONS.chevR}</div>
-            </div>
-          `
-          : (day.plan_b_custom_text
-              ? `<div class="plan-b-content"><div class="body"><div class="desc" style="font-size:14px; color:var(--ink);">${escapeHtml(day.plan_b_custom_text)}</div></div></div>`
-              : `<div class="plan-b-content"><div class="body"><div class="desc">No Plan B set yet.</div></div></div>`);
+            </div>`;
+        } else if (day.plan_b_pointer && day.plan_b_pointer !== 'custom') {
+          // Pointer references a library id we have not loaded into the cache.
+          planBHtml = `<div class="plan-b-content"><div class="body"><div class="desc">Linked fallback (open Library to view).</div></div></div>`;
+        } else if (day.plan_b_custom_text) {
+          planBHtml = `<div class="plan-b-content"><div class="body"><div class="desc" style="font-size:14px; color:var(--ink);">${escapeHtml(day.plan_b_custom_text)}</div></div></div>`;
+        } else {
+          planBHtml = `<div class="plan-b-content"><div class="body"><div class="desc">No Plan B set yet.</div></div></div>`;
+        }
 
-        const otherTags = (day.tags || []).filter(t => t !== day.primary_tag);
+        const dayTags = splitTags(day.tags);
+        const otherTags = dayTags.filter(t => t !== day.primary_tag);
 
         return `
           <main class="view">
             <div class="today-hero ${tagClass(day.primary_tag)}">
               <div class="today-date-row">
                 <div class="today-date">${escapeHtml(formatLongDate(d))}</div>
-                ${day.weather_sensitive ? `<div class="today-weather">${ICONS.rain} weather-sensitive</div>` : ''}
+                ${asBool(day.weather_sensitive) ? `<div class="today-weather">${ICONS.rain} weather-sensitive</div>` : ''}
               </div>
               <div class="day-nav">
                 <button onclick="app.shiftDay(-1)" aria-label="Previous day">${ICONS.chevL}</button>
@@ -1281,11 +1759,14 @@
             </div>
 
             <section class="plan-section">
-              <h3>Plan A <span class="label-pill">today</span></h3>
+              <h3>Plan A <span class="label-pill">plan</span></h3>
               ${items.length
-                ? renderGroup('Shared', grouped.shared) + renderGroup('Henry · elementary', grouped.elder) + renderGroup('Mia · preschool', grouped.younger)
-                : `<div class="plan-item"><div class="body"><div class="title" style="color:var(--ink-soft); font-weight:400;">${escapeHtml(day.plan_a_summary || 'No items yet')}</div></div></div>`
+                ? renderGroup('Shared', grouped.shared) + renderGroup('Elder', grouped.elder) + renderGroup('Younger', grouped.younger)
+                : (day.plan_a_summary
+                    ? `<div class="plan-item"><div class="body"><div class="title" style="color:var(--ink-soft); font-weight:400;">${escapeHtml(day.plan_a_summary)}</div></div></div>`
+                    : `<div class="plan-item"><div class="body"><div class="title" style="color:var(--ink-soft); font-weight:400;">No items yet</div></div></div>`)
               }
+              <button class="link-btn" onclick="app.openPlanItem()">+ Add item</button>
             </section>
 
             <section class="plan-section">
@@ -1294,8 +1775,8 @@
             </section>
 
             <div class="cta-row">
-              <button class="btn-primary" onclick="app.stubPhotoUpload()">${ICONS.camIcon} Sync paper calendar</button>
-              <button class="btn-secondary" onclick="app.stubEdit()">${ICONS.pencil} Edit this day</button>
+              <button class="btn-primary" onclick="app.openDayEditor()">${ICONS.pencil} Edit this day</button>
+              <button class="btn-secondary" onclick="app.openDuplicate()">${ICONS.calendar(false)} Copy this day to a date range</button>
             </div>
           </main>
         `;
@@ -1307,10 +1788,11 @@
       viewWeek() {
         const start = parseISO(this.state.weekStart);
         const dates = Array.from({length: 7}, (_, i) => isoDate(addDays(start, i)));
-        const days = dates.map(d => {
-          const found = this.mockData.days.find(x => x.date === d);
-          return found || { date: d, primary_tag: null, tags: [], plan_a_summary: '', weather_sensitive: false, plan_b_pointer: null };
-        });
+        // Merge live day rows onto the 7-day skeleton (missing days render empty).
+        const byDate = {};
+        (this.data.weekDays || []).forEach(x => { byDate[x.date] = x; });
+        const days = dates.map(d => byDate[d] || { date: d, primary_tag: null, tags: '', plan_a_summary: '', weather_sensitive: false, plan_b_pointer: null });
+        const todayIso = isoDate(new Date());
 
         return `
           <main class="view">
@@ -1324,10 +1806,10 @@
             <div class="week-list">
               ${days.map(day => {
                 const d = parseISO(day.date);
-                const tags = day.tags || [];
+                const tags = splitTags(day.tags);
                 const indoor = tags.includes('indoor');
                 const outdoor = tags.includes('outdoor');
-                const isToday = day.date === '2026-06-16';
+                const isToday = day.date === todayIso;
                 const isPlanBCustom = day.plan_b_pointer === 'custom';
                 const isPlanBLibrary = day.plan_b_pointer && day.plan_b_pointer !== 'custom';
                 return `
@@ -1343,7 +1825,7 @@
                         <div class="tag-line">${tags.map(t => escapeHtml(tagLabel(t).toLowerCase())).join(' · ') || '&nbsp;'}</div>
                       </div>
                       <div class="icons">
-                        ${day.weather_sensitive ? ICONS.rain : ''}
+                        ${asBool(day.weather_sensitive) ? ICONS.rain : ''}
                         ${indoor && !outdoor ? ICONS.indoor : ''}
                         ${outdoor && !indoor ? ICONS.outdoor : ''}
                         ${isPlanBLibrary ? ICONS.bookmarkSm : ''}
@@ -1363,11 +1845,14 @@
       // ============================================================
       viewLibrary() {
         const filter = this.state.libraryFilter;
-        const items = filter === 'all'
-          ? this.mockData.library
-          : this.mockData.library.filter(i => i.tag === filter);
+        const all = this.data.library || [];
+        const items = filter === 'all' ? all : all.filter(i => i.tag === filter);
 
-        const filters = ['all', 'outdoor', 'indoor', 'chill', 'playdate', 'day-trip', 'mountains', 'errands'];
+        // Build filters from the loaded tag set (display_order).
+        const sortedTags = [...this.data.tags].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+        const filters = ['all'].concat(sortedTags.map(t => t.tag));
+
+        const ageLabel = (a) => a === 'both' || a === 'any' ? 'all ages' : a;
 
         return `
           <main class="view">
@@ -1376,7 +1861,7 @@
 
             <div class="filter-bar">
               ${filters.map(f => `
-                <button class="filter-chip ${filter === f ? 'active' : ''} ${f !== 'all' ? tagClass(f) : ''}" onclick="app.setLibraryFilter('${f}')">
+                <button class="filter-chip ${filter === f ? 'active' : ''} ${f !== 'all' ? tagClass(f) : ''}" onclick="app.setLibraryFilter('${escapeHtml(f)}')">
                   ${f !== 'all' ? '<span class="swatch"></span>' : ''}
                   ${escapeHtml(f === 'all' ? 'All' : tagLabel(f))}
                 </button>
@@ -1385,60 +1870,39 @@
 
             <div class="library-list">
               ${items.length ? items.map(it => `
-                <div class="library-card">
+                <button class="library-card" style="width:100%;text-align:left;background:var(--surface);" onclick="app.openLibraryEditor('${escapeHtml(it.id)}')">
                   <div class="top">
                     <div class="name ${tagClass(it.tag)}">
                       <span class="swatch"></span>
                       ${escapeHtml(it.name)}
                     </div>
                     <div class="meta">
-                      ${it.indoor ? ICONS.indoor : ICONS.outdoor}
-                      <span class="age-pill">${escapeHtml(it.age_fit === 'both' ? 'all ages' : it.age_fit)}</span>
+                      ${asBool(it.indoor) ? ICONS.indoor : ICONS.outdoor}
+                      <span class="age-pill">${escapeHtml(ageLabel(it.kid_age_fit))}</span>
                     </div>
                   </div>
-                  <div class="desc">${escapeHtml(it.description)}</div>
-                </div>
+                  ${it.description ? `<div class="desc">${escapeHtml(it.description)}</div>` : ''}
+                </button>
               `).join('') : `<div class="empty-state">No fallbacks match this filter.</div>`}
             </div>
           </main>
 
-          <button class="fab" onclick="app.stubAddFallback()" aria-label="Add fallback">${ICONS.plus}</button>
+          <button class="fab" onclick="app.openLibraryEditor()" aria-label="Add fallback">${ICONS.plus}</button>
         `;
       },
 
       // ============================================================
       // PHOTOS
       // ============================================================
+      // Stub until Wave 4 wires camera capture + OCR reconciliation.
       viewPhotos() {
-        const photos = [...this.mockData.photos].sort((a,b) => b.uploaded_at.localeCompare(a.uploaded_at));
         return `
           <main class="view">
             <h2 class="view-title">Photos</h2>
             <div class="view-sub">Paper-calendar snapshots. Reconciliation surfaces what we extracted.</div>
-
-            <div class="photo-list">
-              ${photos.map(p => {
-                const d = parseISO(p.date);
-                const label = `${DOW[d.getDay()]}<br>${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
-                const badge = p.status === 'reconciled'
-                  ? `<span class="badge good">${ICONS.check} Reconciled</span>`
-                  : `<span class="badge warn">Needs review</span>`;
-                return `
-                  <button class="photo-row" onclick="app.stubReconcile('${p.id}')">
-                    <div class="photo-thumb ${tagClass('chill')}">${label}</div>
-                    <div class="photo-info">
-                      <div class="photo-date">${escapeHtml(p.covers)}</div>
-                      <div class="photo-meta">Uploaded ${escapeHtml(p.uploaded_at)}</div>
-                      ${badge}
-                    </div>
-                    <div style="color:var(--ink-faint);">${ICONS.chevR}</div>
-                  </button>
-                `;
-              }).join('')}
-            </div>
-
-            <div style="margin-top: 18px;">
-              <button class="btn-primary" onclick="app.stubPhotoUpload()">${ICONS.camIcon} Take a photo</button>
+            <div class="empty-state">
+              <div style="margin-bottom:14px;">Photo capture and OCR reconciliation land in Wave 4.</div>
+              <button class="btn-secondary" style="max-width:220px;margin:0 auto;" onclick="app.stubPhotoUpload()">${ICONS.camIcon} Take a photo</button>
             </div>
           </main>
         `;
@@ -1448,50 +1912,58 @@
       // SETTINGS
       // ============================================================
       viewSettings() {
-        const s = this.mockData.settings;
-        const tags = [...this.mockData.tags].sort((a,b) => a.display_order - b.display_order);
+        const s = this.data.settings || {};
+        const tags = [...this.data.tags].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+        const family = s.family_calendar_id || '';
+        const readOnly = (s.read_only_calendar_ids || '').split(',').map(x => x.trim()).filter(Boolean);
+        const folder = s.photo_drive_folder_id || '';
+        const mono = 'font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break:break-all;';
 
         return `
           <main class="view">
             <h2 class="view-title">Settings</h2>
-            <div class="view-sub">Mocked for Wave 1. Wave 3 wires these to the GAS backend.</div>
+            <div class="view-sub">Connected calendars and tags from the backend.</div>
 
             <div class="settings-section">
               <h3>Connected calendars</h3>
               <div class="settings-row">
                 <span class="label">Write to (family)</span>
-                <span class="value">${escapeHtml(s.family_calendar)}</span>
+                <span class="value" style="${mono}">${escapeHtml(family || 'not set')}</span>
               </div>
-              ${s.read_only_calendars.map(c => `
+              ${readOnly.length ? readOnly.map(c => `
                 <div class="settings-row">
                   <span class="label">Read-only</span>
-                  <span class="value">${escapeHtml(c)}</span>
+                  <span class="value" style="${mono}">${escapeHtml(c)}</span>
                 </div>
-              `).join('')}
+              `).join('') : `<div class="settings-row"><span class="label">Read-only</span><span class="value">none</span></div>`}
             </div>
 
             <div class="settings-section">
               <h3>Photo upload</h3>
               <div class="settings-row">
                 <span class="label">Drive folder</span>
-                <span class="value" style="font-family: ui-monospace, Menlo, monospace; font-size: 13px;">${escapeHtml(s.photo_folder)}</span>
-              </div>
-              <div class="settings-row">
-                <span class="label">Reminder</span>
-                <span class="value">Weekday mornings + Sun PM</span>
+                <span class="value" style="${mono}">${escapeHtml(folder || 'not set')}</span>
               </div>
             </div>
 
             <div class="settings-section">
               <h3>Tags</h3>
               ${tags.map(t => `
-                <div class="tag-mgmt ${tagClass(t.tag)}">
-                  <span class="swatch" style="background: var(--chip-color);"></span>
+                <div class="tag-mgmt ${tagClass(t.tag)}" style="cursor:pointer;" onclick="app.openTagEditor('${escapeHtml(t.tag)}')">
+                  <span class="swatch" style="background: ${escapeHtml(t.color || 'var(--chip-color)')};"></span>
                   <span class="name">${escapeHtml(tagLabel(t.tag))}</span>
-                  <span class="order">order ${t.display_order}</span>
+                  <span class="order">order ${escapeHtml(t.display_order)}</span>
                 </div>
               `).join('')}
-              <button class="link-btn" onclick="app.openModal('Add tag', 'Tag management lands in Wave 3.')">+ Add tag</button>
+              <button class="link-btn" onclick="app.openTagEditor()">+ Add tag</button>
+            </div>
+
+            <div class="settings-section">
+              <h3>Access</h3>
+              <div class="settings-row">
+                <span class="label">Access token</span>
+                <button class="link-btn" style="padding:0;" onclick="app.changeToken()">Change access token</button>
+              </div>
             </div>
 
             <div class="settings-section">
@@ -1501,12 +1973,8 @@
                 <span class="value">KidPlan</span>
               </div>
               <div class="settings-row">
-                <span class="label">Version</span>
-                <span class="value">${escapeHtml(s.app_version)}</span>
-              </div>
-              <div class="settings-row">
                 <span class="label">Build</span>
-                <span class="value">Wave 1 scaffold</span>
+                <span class="value">Wave 3 - live</span>
               </div>
             </div>
           </main>
@@ -1514,12 +1982,12 @@
       }
     };
 
-    // Boot
-    document.addEventListener('DOMContentLoaded', () => app.render());
-    if (document.readyState !== 'loading') app.render();
+    // Boot - token gate then live load.
+    document.addEventListener('DOMContentLoaded', () => app.boot());
+    if (document.readyState !== 'loading') app.boot();
 
     // Register service worker placeholder (no SW file yet; safe no-op).
-    // Wave 3 may add offline caching here.
+    // Wave 4 may add offline caching here.
   </script>
 </body>
 </html>
