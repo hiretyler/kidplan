@@ -164,3 +164,47 @@ In the Apps Script editor, on first deploy you may be prompted to "Review permis
 
 - (a) Opening the Pages URL on your phone shows the KidPlan home screen with real data from the Sheet.
 - (b) `?action=ping` against the GAS URL returns `{ok: true, user: "soleilandtyler@gmail.com"}`. Test by visiting `<DEPLOYMENT_URL>?action=ping` in a browser signed in as the shared account.
+
+---
+
+## Troubleshooting (clasp)
+
+### "Invalid container file type" on `clasp create`
+clasp 3.x removed the `webapp` and `api` project types. Create a `standalone` project instead - the web-app config lives in `appsscript.json`, which already declares the `webapp` block and OAuth scopes:
+
+```
+clasp create-script --type standalone --title "KidPlan API"
+git checkout appsscript.json   # restore our manifest if clasp clobbered it
+clasp push
+```
+
+### `invalid_grant` / `reauth related error (invalid_rapt)`
+clasp's reauth proof token expired (common right after enabling new APIs or adding OAuth scopes on a 2FA account). Re-login:
+
+```
+clasp login            # or: clasp login --no-localhost
+```
+
+If it recurs immediately, wait a minute and retry the login once.
+
+### Working across multiple Google accounts without constant login/logout
+clasp 3.x reads the env var `clasp_config_auth` (a global `-A, --auth <file>` flag) to choose which credential file to use; default is `~/.clasprc.json`. Keep one credential file per account and select per command.
+
+One-time, per account (sign in as the matching account each time):
+
+```
+mkdir -p ~/.clasp-accounts
+clasp_config_auth=~/.clasp-accounts/soleilandtyler.json clasp login   # soleilandtyler@gmail.com (this project)
+clasp_config_auth=~/.clasp-accounts/geddeslabs.json     clasp login   # tyler@geddeslabs.com
+clasp_config_auth=~/.clasp-accounts/hiretyler.json      clasp login   # hiretyler@gmail.com (everything else)
+```
+
+Then add wrapper functions to `~/.zshrc` so daily use is friction-free:
+
+```zsh
+clasp-soleil()     { clasp_config_auth=~/.clasp-accounts/soleilandtyler.json clasp "$@"; }
+clasp-geddeslabs() { clasp_config_auth=~/.clasp-accounts/geddeslabs.json     clasp "$@"; }
+clasp-hiretyler()  { clasp_config_auth=~/.clasp-accounts/hiretyler.json      clasp "$@"; }
+```
+
+For KidPlan, always use `clasp-soleil` (e.g. `clasp-soleil push`, `clasp-soleil deploy -i <id>`). The env-var-prefix form is order-independent, which matters because `--auth` is a global flag clasp is fussy about placing after subcommands.
