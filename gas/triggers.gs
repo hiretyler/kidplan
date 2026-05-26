@@ -4,7 +4,7 @@
 // calendar" event on the family calendar: weekday mornings 8:00am Mon-Fri plus
 // Sunday 7:00pm. Stores the created event id in PHOTO_PROMPT_EVENT_ID and bails
 // if already set, to avoid duplicates.
-function setup_recurringPhotoPromptEvent_() {
+function setupRecurringPhotoPromptEvent() {
   const props = PropertiesService.getScriptProperties();
   if (props.getProperty('PHOTO_PROMPT_EVENT_ID')) {
     return { ok: true, message: 'photo prompt event already created; nothing to do' };

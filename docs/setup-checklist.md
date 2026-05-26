@@ -28,7 +28,7 @@ One-time setup for Tyler. Everything happens under the shared `soleilandtyler@gm
    - `https://docs.google.com/spreadsheets/d/<THIS_IS_THE_ID>/edit`
 4. Save the ID for Section 7.
 
-Note: the GAS `setup_seedSheet_()` function in `gas/sheets.gs` will be added in Wave 2 and will populate the 6 tabs (`Days`, `PlanItems`, `Library`, `Tags`, `Photos`, `Settings`) and their headers automatically. For now just leave the Sheet empty.
+Note: the GAS `setupSeedSheet()` function in `gas/sheets.gs` populates the 6 tabs (`Days`, `PlanItems`, `Library`, `Tags`, `Photos`, `Settings`) and their headers automatically (run it once from the editor after deploying). For now just leave the Sheet empty.
 
 ---
 

@@ -179,7 +179,9 @@ function deleteRow_(tabName, keyColumn, keyValue) {
 
 // Idempotent setup. Tyler runs once from the editor. Ensures all 6 tabs exist
 // with header rows, then seeds Tags/Library/Settings only if empty.
-function setup_seedSheet_() {
+// No trailing underscore: trailing-underscore functions are private and do not
+// appear in the editor Run dropdown.
+function setupSeedSheet() {
   const ss = openSheet_();
 
   // Ensure every tab exists with the correct header row.
