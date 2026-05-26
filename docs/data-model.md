@@ -1,6 +1,6 @@
 # KidPlan Data Model
 
-The backend store is a single Google Sheet with 6 tabs. The GAS API is the only writer; the frontend never talks to Sheets directly. All writes go through a single `openSheet_()` chokepoint guarded by `LockService.getDocumentLock()`.
+The backend store is a single Google Sheet with 6 tabs. The GAS API is the only writer; the frontend never talks to Sheets directly. Reads open the Sheet through a single `openSheet_()` chokepoint; writes go through the `upsertRow_`/`deleteRow_` helpers guarded by `LockService.getScriptLock()` (released in a `finally`).
 
 Conventions used throughout:
 
@@ -105,5 +105,5 @@ Singleton key-value store. Mirrors the Script Properties set up in the setup che
 
 | Column | Type | Nullable | Notes |
 |---|---|---|---|
-| `key` | string | no | Primary key. Known keys: `family_calendar_id`, `read_only_calendar_ids`, `vision_service_account_key`, `photo_drive_folder_id`. |
-| `value` | string | no | Stringified value. For `read_only_calendar_ids` this is a comma-separated string; for `vision_service_account_key` this is the full JSON blob as a string. |
+| `key` | string | no | Primary key. App-editable keys: `family_calendar_id`, `read_only_calendar_ids`, `photo_drive_folder_id`. Secrets (`API_TOKEN`, `VISION_SERVICE_ACCOUNT_JSON`) live ONLY in Script Properties, never in this tab, and are never returned by `get_settings`. |
+| `value` | string | no | Stringified value. For `read_only_calendar_ids` this is a comma-separated string. |
