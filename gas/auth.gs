@@ -16,11 +16,18 @@ const tokensMatch_ = (a, b) => {
 };
 
 // Wraps a handler so it only runs when the request carries the shared token.
-const withAuth_ = (fn) => (params) => {
-  const expected = getApiToken_();
-  if (!expected) return { ok: false, error: 'server missing API_TOKEN' };
-  if (!tokensMatch_(params && params.token, expected)) {
-    return { ok: false, error: 'unauthorized' };
-  }
-  return fn(params);
-};
+// Declared as a function (not a const arrow) so it hoists across files:
+// api.gs builds ROUTES at load time and calls withAuth_ before auth.gs is
+// evaluated (GAS loads files alphabetically; api < auth). const arrows do not
+// hoist across files; function declarations do. The helpers below stay const
+// because they are only called at request time, by which point auth.gs has run.
+function withAuth_(fn) {
+  return function (params) {
+    const expected = getApiToken_();
+    if (!expected) return { ok: false, error: 'server missing API_TOKEN' };
+    if (!tokensMatch_(params && params.token, expected)) {
+      return { ok: false, error: 'unauthorized' };
+    }
+    return fn(params);
+  };
+}
