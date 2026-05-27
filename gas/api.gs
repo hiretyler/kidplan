@@ -63,11 +63,16 @@ const upsert_plan_item = (params) => {
   if (!item.source) item.source = 'manual';
 
   // First write so the row exists, then sync calendar, then persist event id.
+  // The row must always persist; a calendar failure becomes a soft warning.
   let saved = upsertRow_('PlanItems', 'id', item);
-  const eventId = writePlanItemToCalendar_(saved);
-  if (eventId && eventId !== saved.gcal_event_id) {
-    saved.gcal_event_id = eventId;
-    saved = upsertRow_('PlanItems', 'id', saved);
+  try {
+    const eventId = writePlanItemToCalendar_(saved);
+    if (eventId && eventId !== saved.gcal_event_id) {
+      saved.gcal_event_id = eventId;
+      saved = upsertRow_('PlanItems', 'id', saved);
+    }
+  } catch (err) {
+    return { ok: true, data: saved, calendar_warning: err.message };
   }
   return { ok: true, data: saved };
 };
@@ -96,6 +101,7 @@ const duplicate_day_to_range = (params) => {
   );
 
   let created = 0;
+  let calendarWarning = '';
   targets.forEach((targetDate) => {
     // Copy the Day row (preserve plan fields, retarget the date).
     const dayCopy = {};
@@ -112,16 +118,23 @@ const duplicate_day_to_range = (params) => {
       itemCopy.date = targetDate;
       itemCopy.gcal_event_id = '';
       delete itemCopy.updated_at;
-      let saved = upsertRow_('PlanItems', 'id', itemCopy);
-      const eventId = writePlanItemToCalendar_(saved);
-      if (eventId) {
-        saved.gcal_event_id = eventId;
-        upsertRow_('PlanItems', 'id', saved);
+      const saved = upsertRow_('PlanItems', 'id', itemCopy);
+      // Best-effort calendar sync; a failure must not lose the row or abort the loop.
+      try {
+        const eventId = writePlanItemToCalendar_(saved);
+        if (eventId) {
+          saved.gcal_event_id = eventId;
+          upsertRow_('PlanItems', 'id', saved);
+        }
+      } catch (err) {
+        if (!calendarWarning) calendarWarning = err.message;
       }
       created++;
     });
   });
-  return { ok: true, data: { days_created: targets.length, plan_items_created: created } };
+  const result = { days_created: targets.length, plan_items_created: created };
+  if (calendarWarning) return { ok: true, data: result, calendar_warning: calendarWarning };
+  return { ok: true, data: result };
 };
 
 const list_library = (_params) => ({ ok: true, data: getRows_('Library') });

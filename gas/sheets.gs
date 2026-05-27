@@ -210,7 +210,7 @@ function setupSeedSheet() {
   return { ok: true, message: 'sheet setup complete' };
 }
 
-// 7 preset tags with hex colors, display_order 1-7, is_preset TRUE.
+// 6 preset tags with hex colors, display_order 1-6, is_preset TRUE.
 function seedTags_(ss) {
   const sheet = ss.getSheetByName('Tags');
   if (sheet.getLastRow() > 1) return; // already seeded
@@ -220,8 +220,7 @@ function seedTags_(ss) {
     ['day-trip', '#E8B25C', 3, true],
     ['mountains', '#4F7A5C', 4, true],
     ['playdate', '#E89B83', 5, true],
-    ['chill', '#B8A6D9', 6, true],
-    ['errands', '#B8A89A', 7, true],
+    ['errands', '#B8A89A', 6, true],
   ];
   sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
 }
@@ -237,7 +236,7 @@ function seedLibrary_(ss) {
     [libId_(), "Children's museum", 'day-trip', 'Hands-on exhibits, water table, climbing area. Burns a lot of energy.', true, 180, 'both', 'Members skip the line. Bring a change of clothes for water play.'],
     [libId_(), 'Favorite park', 'outdoor', 'The big playground with the shaded structure and the swings both kids like.', false, 90, 'both', 'Sunscreen + water bottles. Restrooms near the parking lot.'],
     [libId_(), 'Backyard water play', 'outdoor', 'Sprinkler, water table, and the little pool. Easy low-prep summer afternoon.', false, 60, 'young', 'Towels by the back door. Watch the toddler near the pool.'],
-    [libId_(), 'Movie afternoon', 'chill', 'Pick a family movie, make popcorn, build a blanket fort. Quiet reset day.', true, 120, 'both', 'Good rainy-day or recovering-from-busy-week option.'],
+    [libId_(), 'Friend playdate at the park', 'playdate', 'Meet another family at the playground for a relaxed couple of hours.', false, 120, 'both', 'Coordinate snacks. Confirm the time the night before.'],
     [libId_(), 'Baking project', 'indoor', 'Bake cookies or muffins together. Older kid measures, younger kid stirs.', true, 90, 'both', 'Check we have eggs and butter before committing.'],
     [libId_(), 'Nature walk', 'outdoor', 'Easy trail walk with a scavenger-hunt list (pinecone, red leaf, smooth rock).', false, 75, 'older', 'Hats + bug spray. Stroller for the little one if needed.'],
     [libId_(), 'Mountain picnic drive', 'mountains', 'Short drive up to the picnic spot, easy walk, lunch with a view.', false, 240, 'both', 'Pack layers - cooler up top. Leave early to beat afternoon storms.'],
@@ -256,6 +255,137 @@ function seedSettings_(ss) {
     ['photo_drive_folder_id', ''],
   ];
   sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+// One-time live migration. Tyler runs once from the editor. Merges the retired
+// 'chill' tag into 'indoor' across every tab. Idempotent: safe to re-run.
+// No trailing underscore so it appears in the editor Run dropdown.
+function migrateMergeChillIntoIndoor() {
+  const ss = openSheet_();
+  const summary = {
+    tags_chill_deleted: false,
+    tags_indoor_ensured: false,
+    days_primary_tag_updated: 0,
+    days_tags_updated: 0,
+    library_tag_updated: 0,
+    plan_items_tag_updated: 0,
+  };
+
+  // Tags tab: ensure indoor exists, drop chill.
+  const indoorRow = getRowByKey_('Tags', 'tag', 'indoor');
+  if (!indoorRow) {
+    // Append after current rows so display_order does not collide.
+    const order = getRows_('Tags').length + 1;
+    upsertRow_('Tags', 'tag', { tag: 'indoor', color: '#7AA6C2', display_order: order, is_preset: true });
+    summary.tags_indoor_ensured = true;
+  }
+  if (getRowByKey_('Tags', 'tag', 'chill')) {
+    deleteRow_('Tags', 'tag', 'chill');
+    summary.tags_chill_deleted = true;
+  }
+
+  // Days tab: primary_tag and the comma-separated tags column.
+  getRows_('Days').forEach((day) => {
+    let changed = false;
+    const update = { date: day.date };
+    if (day.primary_tag === 'chill') {
+      update.primary_tag = 'indoor';
+      summary.days_primary_tag_updated++;
+      changed = true;
+    }
+    const merged = mergeChillInTagList_(day.tags);
+    if (merged !== null) {
+      update.tags = merged;
+      summary.days_tags_updated++;
+      changed = true;
+    }
+    if (changed) upsertRow_('Days', 'date', update);
+  });
+
+  // Library and PlanItems: simple tag value replacement.
+  summary.library_tag_updated = replaceTagValue_('Library', 'id', 'chill', 'indoor');
+  summary.plan_items_tag_updated = replaceTagValue_('PlanItems', 'id', 'chill', 'indoor');
+
+  SpreadsheetApp.flush();
+  return summary;
+}
+
+// Replace 'chill' with 'indoor' in a comma-separated tag list and de-dup.
+// Returns the new string if it changed, or null if nothing to do.
+function mergeChillInTagList_(raw) {
+  if (!raw || String(raw).indexOf('chill') === -1) return null;
+  const parts = String(raw).split(',').map((s) => s.trim()).filter((s) => s !== '');
+  const seen = {};
+  const out = [];
+  let changed = false;
+  parts.forEach((p) => {
+    const v = p === 'chill' ? 'indoor' : p;
+    if (p === 'chill') changed = true;
+    if (!seen[v]) {
+      seen[v] = true;
+      out.push(v);
+    } else {
+      changed = true; // dropped a duplicate
+    }
+  });
+  return changed ? out.join(',') : null;
+}
+
+// Replace a 'tag' column value across a tab. Returns count of rows updated.
+function replaceTagValue_(tabName, keyColumn, fromTag, toTag) {
+  let count = 0;
+  getRows_(tabName).forEach((row) => {
+    if (row.tag === fromTag) {
+      const update = {};
+      update[keyColumn] = row[keyColumn];
+      update.tag = toTag;
+      upsertRow_(tabName, keyColumn, update);
+      count++;
+    }
+  });
+  return count;
+}
+
+// One-time coverage check. Tyler runs once from the editor. Ensures the LIVE
+// Library has at least one item for each of the 6 final tags, adding a sensible
+// fallback for any tag with zero items. Idempotent. No trailing underscore.
+function ensureLibraryFallbackPerTag() {
+  const finalTags = ['indoor', 'outdoor', 'day-trip', 'mountains', 'playdate', 'errands'];
+  // id | name | tag | description | indoor | typical_duration_min | kid_age_fit | notes
+  const fallbacks = {
+    indoor: ['Rainy-day craft kit', 'indoor', 'Pull out the craft bin: glue, paper, stickers. Good when stuck inside.', true, 60, 'both', 'Cover the table first.'],
+    outdoor: ['Favorite park', 'outdoor', 'The big playground with the shaded structure and the swings.', false, 90, 'both', 'Sunscreen and water bottles.'],
+    'day-trip': ["Children's museum", 'day-trip', 'Hands-on exhibits and a climbing area. Burns a lot of energy.', true, 180, 'both', 'Bring a change of clothes for water play.'],
+    mountains: ['Mountain picnic drive', 'mountains', 'Short drive up to the picnic spot, easy walk, lunch with a view.', false, 240, 'both', 'Pack layers. Leave early to beat afternoon storms.'],
+    playdate: ['Friend playdate at the park', 'playdate', 'Meet another family at the playground for a relaxed couple of hours.', false, 120, 'both', 'Coordinate snacks ahead of time.'],
+    errands: ['Errand adventure', 'errands', 'Combine the grocery and hardware run into a small outing with a treat stop.', true, 90, 'both', 'Snacks in the car.'],
+  };
+
+  // Tally existing coverage from the live Library.
+  const have = {};
+  getRows_('Library').forEach((row) => {
+    if (row.tag) have[row.tag] = true;
+  });
+
+  const added = [];
+  finalTags.forEach((tag) => {
+    if (have[tag]) return;
+    const f = fallbacks[tag];
+    upsertRow_('Library', 'id', {
+      id: genId_(),
+      name: f[0],
+      tag: f[1],
+      description: f[2],
+      indoor: f[3],
+      typical_duration_min: f[4],
+      kid_age_fit: f[5],
+      notes: f[6],
+    });
+    added.push(tag);
+  });
+
+  SpreadsheetApp.flush();
+  return { tags_with_new_fallback: added };
 }
 
 // Short opaque id generator for Library/PlanItems rows.
