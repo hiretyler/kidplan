@@ -851,6 +851,170 @@
       margin-bottom: 14px;
     }
     .inline-notice svg { flex-shrink: 0; margin-top: 1px; }
+
+    /* ---------- Activity row with inline controls ---------- */
+    .activity-item {
+      padding: 12px 0;
+      border-bottom: 1px solid var(--surface-warm);
+    }
+    .activity-item:last-of-type { border-bottom: none; }
+    .activity-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .activity-top .swatch {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: var(--chip-color, var(--ink-faint));
+      flex-shrink: 0;
+    }
+    .activity-top .title {
+      font-weight: 500;
+      font-size: 15px;
+      flex: 1;
+      min-width: 0;
+    }
+    .activity-del {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--ink-faint);
+      flex-shrink: 0;
+    }
+    .activity-del:active { background: #F8DCD2; color: #B95A3A; }
+    .activity-controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      align-items: center;
+    }
+    .inline-select {
+      padding: 7px 9px;
+      border: 1px solid var(--surface-warm);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      background: var(--surface-warm);
+      color: var(--ink);
+      font-family: inherit;
+      flex-shrink: 0;
+    }
+    .inline-time {
+      padding: 7px 8px;
+      border: 1px solid var(--surface-warm);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      background: var(--surface-warm);
+      color: var(--ink);
+      font-family: inherit;
+      font-variant-numeric: tabular-nums;
+      flex: 1;
+      min-width: 0;
+    }
+    .inline-time-sep { font-size: 12px; color: var(--ink-faint); }
+
+    /* ---------- Library picker ---------- */
+    .picker-search {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--ink-faint);
+      border-radius: var(--radius-sm);
+      font-size: 15px;
+      background: var(--surface);
+      font-family: inherit;
+      margin-bottom: 12px;
+    }
+    .picker-newbtn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 13px 14px;
+      border-radius: var(--radius);
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    .picker-planb {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--ink-soft);
+      background: #E6E0F0;
+      border-radius: var(--radius-sm);
+      padding: 9px 12px;
+      margin-bottom: 12px;
+    }
+    .picker-planb .pb-name { color: #6F5BAA; font-weight: 600; flex: 1; min-width: 0; }
+    .picker-planb .pb-clear {
+      color: #6F5BAA;
+      font-weight: 600;
+      font-size: 12px;
+      padding: 2px 4px;
+    }
+    .picker-list { display: flex; flex-direction: column; gap: 8px; }
+    .picker-row {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .picker-row .name {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .picker-row .swatch {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: var(--chip-color, var(--ink-faint));
+      flex-shrink: 0;
+    }
+    .picker-row .meta {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--ink-soft);
+      margin-top: 4px;
+    }
+    .picker-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .picker-add {
+      flex: 1;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 9px 12px;
+      border-radius: var(--radius-sm);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .picker-add:active { transform: translateY(1px); }
+    .picker-setb {
+      background: var(--surface-warm);
+      color: var(--ink-soft);
+      font-weight: 600;
+      font-size: 13px;
+      padding: 9px 12px;
+      border-radius: var(--radius-sm);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .picker-setb.is-b { background: #E6E0F0; color: #6F5BAA; }
   </style>
 </head>
 <body>
@@ -1025,6 +1189,8 @@
         currentDate: isoDate(new Date()), // real today
         weekStart: isoDate(startOfWeek(new Date())),
         libraryFilter: 'all',
+        pickerFilter: 'all',
+        pickerSearch: '',
         modal: null,
         // Transient inline notice shown on Today when a save could not sync to calendar.
         calendarNotice: '',
@@ -1296,6 +1462,7 @@
         let inner;
         switch (m.kind) {
           case 'dayEditor': inner = this.renderDayEditor(m); break;
+          case 'picker':    inner = this.renderLibraryPicker(m); break;
           case 'planItem':  inner = this.renderPlanItemEditor(m); break;
           case 'duplicate': inner = this.renderDuplicateEditor(m); break;
           case 'library':   inner = this.renderLibraryEditor(m); break;
@@ -1523,6 +1690,170 @@
         }
       },
 
+      // ---------- Library picker (primary add-activity flow) ----------
+      // The low-friction default: pick from the family Library to add to the day.
+      openPicker() {
+        this.state.pickerFilter = 'all';
+        this.state.pickerSearch = '';
+        // Library may not be cached when opening from a no-day state; fetch lazily.
+        if (!this.data.library || !this.data.library.length) {
+          apiCall('list_library', {}).then(lib => {
+            this.data.library = lib || [];
+            if (this.state.modal && this.state.modal.kind === 'picker') this.render();
+          }).catch(() => {});
+        }
+        this.openModal({ kind: 'picker' });
+      },
+
+      setPickerFilter(tag) {
+        this.state.pickerFilter = tag;
+        this.render();
+      },
+
+      // Re-render the list in place as the user types (input keeps focus via state).
+      onPickerSearch(val) {
+        this.state.pickerSearch = val;
+        const list = document.getElementById('pickerList');
+        if (list) list.innerHTML = this.pickerRowsHtml();
+      },
+
+      // Rows only, so search keystrokes do not blow away the focused input.
+      pickerRowsHtml() {
+        const filter = this.state.pickerFilter;
+        const q = (this.state.pickerSearch || '').trim().toLowerCase();
+        const day = this.data.day;
+        const planB = day && day.plan_b_pointer && day.plan_b_pointer !== 'custom' ? day.plan_b_pointer : '';
+        let rows = (this.data.library || []);
+        if (filter !== 'all') rows = rows.filter(l => l.tag === filter);
+        if (q) rows = rows.filter(l => (l.name || '').toLowerCase().includes(q) || (l.description || '').toLowerCase().includes(q));
+        if (!rows.length) return `<div class="empty-state" style="margin-top:0;">No activities match. Try "+ New activity" above.</div>`;
+        const ageLabel = (a) => a === 'both' || a === 'any' ? 'all ages' : a;
+        return rows.map(l => {
+          const dur = parseInt(l.typical_duration_min, 10);
+          const isB = planB === l.id;
+          return `
+            <div class="picker-row">
+              <div class="name ${tagClass(l.tag)}"><span class="swatch"></span>${escapeHtml(l.name)}</div>
+              <div class="meta">
+                ${asBool(l.indoor) ? ICONS.indoor : ICONS.outdoor}
+                ${!isNaN(dur) ? `<span>${dur} min</span>` : ''}
+                <span class="age-pill">${escapeHtml(ageLabel(l.kid_age_fit))}</span>
+              </div>
+              <div class="picker-actions">
+                <button class="picker-add" onclick="app.pickFromLibrary('${escapeHtml(l.id)}')">${ICONS.plusSm} Add as activity</button>
+                <button class="picker-setb ${isB ? 'is-b' : ''}" onclick="app.setPlanBFromPicker('${escapeHtml(l.id)}')">${ICONS.bookmarkSm} ${isB ? 'Backup' : 'Set as backup'}</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      },
+
+      renderLibraryPicker() {
+        const sortedTags = [...this.data.tags].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+        const filters = ['all'].concat(sortedTags.map(t => t.tag));
+        const day = this.data.day;
+        const planBId = day && day.plan_b_pointer && day.plan_b_pointer !== 'custom' ? day.plan_b_pointer : '';
+        const planBLib = planBId ? (this.data.library || []).find(l => l.id === planBId) : null;
+        return `
+          ${this.modalHeader('Add from Library')}
+          <button class="picker-newbtn" onclick="app.openLibraryEditor('', true)">${ICONS.plusSm} New activity</button>
+          ${planBLib ? `
+            <div class="picker-planb">
+              ${ICONS.bookmarkSm}
+              <span>Backup: <span class="pb-name">${escapeHtml(planBLib.name)}</span></span>
+              <button class="pb-clear" onclick="app.clearPlanBFromPicker()">Clear</button>
+            </div>` : ''}
+          <input class="picker-search" placeholder="Search activities" value="${escapeHtml(this.state.pickerSearch || '')}" oninput="app.onPickerSearch(this.value)">
+          <div class="filter-bar">
+            ${filters.map(f => `
+              <button class="filter-chip ${this.state.pickerFilter === f ? 'active' : ''} ${f !== 'all' ? tagClass(f) : ''}" onclick="app.setPickerFilter('${escapeHtml(f)}')">
+                ${f !== 'all' ? '<span class="swatch"></span>' : ''}
+                ${escapeHtml(f === 'all' ? 'All' : tagLabel(f))}
+              </button>
+            `).join('')}
+          </div>
+          <div class="picker-list" id="pickerList">${this.pickerRowsHtml()}</div>
+        `;
+      },
+
+      // Instant add: optimistic plan item, reconcile on response, surface calendar_warning.
+      async pickFromLibrary(libId) {
+        const lib = (this.data.library || []).find(l => l.id === libId);
+        if (!lib) return;
+        const date = this.state.currentDate;
+        const params = { date, kid: 'shared', title: lib.name, start_time: '', end_time: '', location: lib.location || '', tag: lib.tag || '', source: 'manual' };
+        // Optimistic temp row so it shows in the day's list immediately.
+        const tempId = 'temp_' + Date.now();
+        this.data.items = (this.data.items || []).concat([Object.assign({ id: tempId }, params)]);
+        this.closeModal();
+        this.render();
+        try {
+          const res = await apiCallRaw('upsert_plan_item', params);
+          this.state.calendarNotice = res.calendar_warning || '';
+          // Replace the temp row with the saved server row.
+          this.data.items = this.data.items.map(it => it.id === tempId ? res.data : it);
+          this.render();
+        } catch (e) {
+          this.data.items = this.data.items.filter(it => it.id !== tempId);
+          this.render();
+          alert('Could not add: ' + e.message);
+        }
+      },
+
+      // Set this library activity as the day's Plan B pointer.
+      async setPlanBFromPicker(libId) {
+        const date = this.state.currentDate;
+        const base = this.data.day || { date, primary_tag: this.data.tags[0] ? this.data.tags[0].tag : '' };
+        const params = {
+          date,
+          primary_tag: base.primary_tag,
+          tags: base.tags || base.primary_tag || '',
+          plan_a_summary: base.plan_a_summary || '',
+          plan_b_pointer: libId,
+          plan_b_custom_text: '',
+          notes: base.notes || '',
+          confidence: base.confidence || 'planned',
+          weather_sensitive: asBool(base.weather_sensitive) ? 'TRUE' : 'FALSE'
+        };
+        try {
+          this.data.day = await apiCall('upsert_day', params);
+          this.render();
+        } catch (e) {
+          alert('Could not set backup: ' + e.message);
+        }
+      },
+
+      async clearPlanBFromPicker() {
+        const day = this.data.day;
+        if (!day) return;
+        try {
+          this.data.day = await apiCall('upsert_day', { date: day.date, primary_tag: day.primary_tag, tags: day.tags || '', plan_a_summary: day.plan_a_summary || '', plan_b_pointer: '', plan_b_custom_text: '', notes: day.notes || '', confidence: day.confidence || 'planned', weather_sensitive: asBool(day.weather_sensitive) ? 'TRUE' : 'FALSE' });
+          this.render();
+        } catch (e) {
+          alert('Could not clear backup: ' + e.message);
+        }
+      },
+
+      // ---------- Inline activity controls (lane + times, edit in place) ----------
+      // Persist a single field change on a day activity via upsert_plan_item.
+      async updatePlanItemField(id, field, value) {
+        const it = (this.data.items || []).find(x => x.id === id);
+        if (!it || String(it[field] || '') === String(value || '')) return;
+        const prev = it[field];
+        it[field] = value; // optimistic local update
+        const params = { id: it.id, date: it.date, kid: it.kid, title: it.title, start_time: it.start_time || '', end_time: it.end_time || '', location: it.location || '', tag: it.tag || '', source: it.source || 'manual' };
+        try {
+          const res = await apiCallRaw('upsert_plan_item', params);
+          this.state.calendarNotice = res.calendar_warning || '';
+          Object.assign(it, res.data);
+          if (this.state.calendarNotice) this.render();
+        } catch (e) {
+          it[field] = prev;
+          this.render();
+          alert('Could not update: ' + e.message);
+        }
+      },
+
       // ---------- Duplicate day to range ----------
       openDuplicate() {
         this.openModal({ kind: 'duplicate' });
@@ -1558,10 +1889,11 @@
       },
 
       // ---------- Library editor ----------
-      openLibraryEditor(id) {
+      openLibraryEditor(id, andAddToDay) {
         let item = id ? (this.data.library || []).find(l => l.id === id) : null;
         if (!item) item = { id: '', name: '', tag: this.data.tags[0] ? this.data.tags[0].tag : '', description: '', indoor: true, typical_duration_min: '', kid_age_fit: 'both', notes: '' };
-        this.openModal({ kind: 'library', item });
+        // andAddToDay: came from the picker - save to Library AND add to the current day.
+        this.openModal({ kind: 'library', item, andAddToDay: !!andAddToDay });
       },
 
       renderLibraryEditor(m) {
@@ -1569,8 +1901,10 @@
         const fld = 'margin-bottom:14px;';
         const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
         const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
+        const addToDay = this.state.modal && this.state.modal.andAddToDay;
         return `
-          ${this.modalHeader(it.id ? 'Edit fallback' : 'Add fallback')}
+          ${this.modalHeader(addToDay ? 'New activity' : (it.id ? 'Edit fallback' : 'Add fallback'))}
+          ${addToDay ? `<p style="margin-bottom:14px;">Saved to your Library and added to today's plan.</p>` : ''}
           <div style="${fld}"><label style="${lbl}">Name</label><input id="lib_name" style="${inp}" value="${escapeHtml(it.name || '')}"></div>
           <div style="${fld}"><label style="${lbl}">Tag</label><select id="lib_tag" style="${inp}">${this.tagOptions(it.tag)}</select></div>
           <div style="${fld}"><label style="${lbl}">Description</label><textarea id="lib_desc" rows="2" style="${inp}">${escapeHtml(it.description || '')}</textarea></div>
@@ -1582,7 +1916,7 @@
             <input type="checkbox" id="lib_indoor" ${asBool(it.indoor) ? 'checked' : ''} style="width:18px;height:18px;"> Indoor
           </label>
           <div style="${fld}"><label style="${lbl}">Notes</label><textarea id="lib_notes" rows="2" style="${inp}">${escapeHtml(it.notes || '')}</textarea></div>
-          <button class="btn-primary" onclick="app.saveLibrary()">Save</button>
+          <button class="btn-primary" onclick="app.saveLibrary()">${addToDay ? 'Save and add to day' : 'Save'}</button>
           ${it.id ? `<button class="btn-secondary" style="margin-top:10px; color:var(--warn);" onclick="app.deleteLibrary('${escapeHtml(it.id)}')">Delete</button>` : ''}
         `;
       },
@@ -1601,8 +1935,16 @@
           notes: document.getElementById('lib_notes').value
         };
         if (it.id) params.id = it.id;
+        const addToDay = this.state.modal && this.state.modal.andAddToDay;
         try {
-          await apiCall('upsert_library', params);
+          const savedLib = await apiCall('upsert_library', params);
+          // Picker path: also add it to the current day as an all-day shared item.
+          if (addToDay) {
+            const date = this.state.currentDate;
+            const piParams = { date, kid: 'shared', title: savedLib.name, start_time: '', end_time: '', location: '', tag: savedLib.tag || '', source: 'manual' };
+            const res = await apiCallRaw('upsert_plan_item', piParams);
+            this.state.calendarNotice = res.calendar_warning || '';
+          }
           this.closeModal();
           this.loadView();
         } catch (e) {
@@ -1696,7 +2038,7 @@
               <div class="empty-state" style="text-align:left;">
                 <div style="font-family:var(--font-display); font-weight:600; font-size:17px; color:var(--ink); margin-bottom:4px;">Nothing planned yet</div>
                 <div style="margin-bottom:16px;">Add an activity to put it on the calendar, or set the day's type and backup plan.</div>
-                <button class="btn-primary" onclick="app.openPlanItem()">${ICONS.plusSm} Add activity</button>
+                <button class="btn-primary" onclick="app.openPicker()">${ICONS.plusSm} Add activity</button>
                 <button class="btn-secondary" style="margin-top:10px;" onclick="app.openDayEditor()">${ICONS.pencil} Set day type / backup plan</button>
                 <div class="sync-hint">
                   ${ICONS.calendar(false)}
@@ -1711,14 +2053,24 @@
         items.forEach(it => { if (grouped[it.kid]) grouped[it.kid].push(it); });
         Object.keys(grouped).forEach(k => grouped[k].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || '')));
 
+        const lanes = [['shared','Shared'],['elder','Elder'],['younger','Younger']];
+        // Inline-editable row: lane + start/end persist on change; tap title to open full editor.
         const renderItem = (it) => `
-          <button class="plan-item" style="width:100%;text-align:left;background:none;" onclick="app.openPlanItem('${escapeHtml(it.id)}')">
-            <div class="time">${escapeHtml(formatTime(it.start_time))}</div>
-            <div class="body">
-              <div class="title">${escapeHtml(it.title)}</div>
-              ${it.location ? `<div class="location">${escapeHtml(it.location)}</div>` : ''}
+          <div class="activity-item ${tagClass(it.tag || day.primary_tag)}">
+            <div class="activity-top">
+              <span class="swatch"></span>
+              <span class="title" onclick="app.openPlanItem('${escapeHtml(it.id)}')">${escapeHtml(it.title)}</span>
+              <button class="activity-del" onclick="app.deletePlanItem('${escapeHtml(it.id)}')" aria-label="Remove">${ICONS.x}</button>
             </div>
-          </button>
+            <div class="activity-controls">
+              <select class="inline-select" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','kid',this.value)">
+                ${lanes.map(([v,l]) => `<option value="${v}" ${it.kid === v ? 'selected' : ''}>${l}</option>`).join('')}
+              </select>
+              <input class="inline-time" type="time" value="${escapeHtml(it.start_time || '')}" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','start_time',this.value)">
+              <span class="inline-time-sep">to</span>
+              <input class="inline-time" type="time" value="${escapeHtml(it.end_time || '')}" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','end_time',this.value)">
+            </div>
+          </div>
         `;
         const renderGroup = (label, arr) => {
           if (!arr.length) return '';
@@ -1775,7 +2127,7 @@
                     ? `<div class="plan-item"><div class="body"><div class="title" style="color:var(--ink-soft); font-weight:400;">${escapeHtml(day.plan_a_summary)}</div></div></div>`
                     : `<div class="plan-item"><div class="body"><div class="title" style="color:var(--ink-soft); font-weight:400;">No activities yet</div></div></div>`)
               }
-              <button class="link-btn" onclick="app.openPlanItem()">+ Add activity</button>
+              <button class="link-btn" onclick="app.openPicker()">+ Add activity</button>
             </section>
 
             <section class="plan-section">
@@ -1789,7 +2141,7 @@
             </div>
 
             <div class="cta-row">
-              <button class="btn-primary" onclick="app.openPlanItem()">${ICONS.plusSm} Add activity</button>
+              <button class="btn-primary" onclick="app.openPicker()">${ICONS.plusSm} Add activity</button>
               <button class="btn-secondary" onclick="app.openDayEditor()">${ICONS.pencil} Set day type / backup plan</button>
               <button class="btn-secondary" onclick="app.openDuplicate()">${ICONS.calendar(false)} Copy this day to a date range</button>
             </div>
