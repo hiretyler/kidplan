@@ -2018,11 +2018,16 @@
 
       viewToday() {
         const date = this.state.currentDate;
-        const day = this.data.day;
         const items = this.data.items || [];
+        // Show the populated view if a day row exists OR activities exist
+        // (activities can be added before a day type is set). Default day fields
+        // so the populated template renders safely without a Days row.
+        const day = this.data.day || (items.length
+          ? { date: date, primary_tag: '', tags: '', plan_b_pointer: '', plan_b_custom_text: '', notes: '', confidence: 'planned', weather_sensitive: false, plan_a_summary: '' }
+          : null);
         const d = parseISO(date);
 
-        // No plan saved for this date yet.
+        // Nothing at all for this date yet.
         if (!day) {
           return `
             <main class="view">

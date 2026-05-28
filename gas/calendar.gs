@@ -40,10 +40,11 @@ function dateTimeFrom_(dateStr, timeStr) {
   );
 }
 
-// Day boundaries for an all-day event spanning a single date.
+// All-day event anchor. Built at NOON local time so timezone conversion never
+// rolls the date back to the previous day (the classic GAS all-day off-by-one).
 function dateOnly_(dateStr) {
   const d = dateStr.split('-');
-  return new Date(parseInt(d[0], 10), parseInt(d[1], 10) - 1, parseInt(d[2], 10));
+  return new Date(parseInt(d[0], 10), parseInt(d[1], 10) - 1, parseInt(d[2], 10), 12, 0, 0);
 }
 
 // Creates or updates the GCal event for a PlanItem. Idempotent via gcal_event_id.
