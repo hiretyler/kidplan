@@ -17,11 +17,13 @@ function getFamilyCalendar_() {
   return cal;
 }
 
-// Title convention based on the PlanItem's kid lane.
+// Title convention. Kid lane prefix, plus a [Backup] prefix when the item is a
+// paired backup so it reads as "not the main thing" at a glance in the GCal grid.
 function planItemTitle_(item) {
   const prefixes = { shared: '[Shared]', elder: '[Elder]', younger: '[Younger]' };
-  const prefix = prefixes[item.kid] || '[Shared]';
-  return prefix + ' ' + (item.title || '');
+  const lane = prefixes[item.kid] || '[Shared]';
+  const backup = (item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true') ? '[Backup] ' : '';
+  return backup + lane + ' ' + (item.title || '');
 }
 
 // Build a Date from a yyyy-MM-dd date + HH:mm time in the family timezone.
@@ -48,16 +50,22 @@ function dateOnly_(dateStr) {
 }
 
 // Creates or updates the GCal event for a PlanItem. Idempotent via gcal_event_id.
-// Returns the event id.
+// Returns the event id. start_time is required upstream; if end_time is blank we
+// default to start + 60 min so events are always timed (never all-day from this
+// path). Backups carry a muted Graphite color to read as de-emphasized.
 function writePlanItemToCalendar_(item) {
   const cal = getFamilyCalendar_();
   const title = planItemTitle_(item);
   const description = buildDescription_(item);
   const location = item.location || '';
 
-  const hasStart = item.start_time && String(item.start_time).trim() !== '';
-  const hasEnd = item.end_time && String(item.end_time).trim() !== '';
-  const timed = hasStart && hasEnd;
+  if (!item.start_time || String(item.start_time).trim() === '') {
+    throw new Error('start_time is required to write a calendar event');
+  }
+  const endTime = (item.end_time && String(item.end_time).trim() !== '')
+    ? item.end_time
+    : addMinutesToTime_(item.start_time, 60);
+  const isBackup = item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true';
 
   // Update path: fetch existing event and mutate in place.
   if (item.gcal_event_id) {
@@ -66,34 +74,46 @@ function writePlanItemToCalendar_(item) {
       existing.setTitle(title);
       existing.setDescription(description);
       existing.setLocation(location);
-      if (timed) {
-        existing.setTime(
-          dateTimeFrom_(item.date, item.start_time),
-          dateTimeFrom_(item.date, item.end_time)
-        );
-      } else {
-        existing.setAllDayDate(dateOnly_(item.date));
-      }
+      existing.setTime(
+        dateTimeFrom_(item.date, item.start_time),
+        dateTimeFrom_(item.date, endTime)
+      );
+      applyBackupColor_(existing, isBackup);
       return existing.getId();
     }
     // Event id was set but the event is gone; fall through to recreate.
   }
 
-  let created;
-  if (timed) {
-    created = cal.createEvent(
-      title,
-      dateTimeFrom_(item.date, item.start_time),
-      dateTimeFrom_(item.date, item.end_time),
-      { description: description, location: location }
-    );
-  } else {
-    created = cal.createAllDayEvent(title, dateOnly_(item.date), {
-      description: description,
-      location: location,
-    });
-  }
+  const created = cal.createEvent(
+    title,
+    dateTimeFrom_(item.date, item.start_time),
+    dateTimeFrom_(item.date, endTime),
+    { description: description, location: location }
+  );
+  applyBackupColor_(created, isBackup);
   return created.getId();
+}
+
+// Graphite (eventColor 8) for backups so they read as muted in the GCal grid.
+// Primaries get the calendar's default color (no setColor call).
+function applyBackupColor_(event, isBackup) {
+  if (!isBackup) return;
+  try {
+    event.setColor(CalendarApp.EventColor.GRAY);
+  } catch (e) {
+    // setColor can throw on older runtimes; failure to color is non-fatal.
+  }
+}
+
+// Add minutes to an HH:mm string, wrapping at 23:59 (no day rollover for the
+// default; the calendar event stays on the same calendar day).
+function addMinutesToTime_(timeStr, minutes) {
+  const t = String(timeStr).split(':');
+  let total = parseInt(t[0], 10) * 60 + parseInt(t[1], 10) + minutes;
+  if (total >= 24 * 60) total = 24 * 60 - 1;
+  const hh = String(Math.floor(total / 60)).padStart(2, '0');
+  const mm = String(total % 60).padStart(2, '0');
+  return hh + ':' + mm;
 }
 
 // Lightweight description so the event traces back to KidPlan.
@@ -130,37 +150,40 @@ function getReadOnlyCalendarIds_() {
     .filter((s) => s !== '');
 }
 
-// All events on a given date across read-only cals + the family cal.
-// Returns [{calendar, title, start, end}] with ISO strings.
-function listConflictingEvents_(date) {
-  const dayStart = dateOnly_(date);
-  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+// Events across [start,end] (inclusive yyyy-MM-dd) on the given calendar ids.
+// Each event is tagged source='kidplan' if its id matches the kidplanIds set
+// (PlanItems.gcal_event_id round-trip), else 'external'. Window is capped at
+// 60 days to keep CalendarApp.getEvents cheap.
+function listCalendarEvents_(start, end, calendarIds, kidplanIds) {
+  const winStart = dateOnly_(start);
+  // dateOnly_ anchors at noon; end-day's exclusive boundary is the next midnight.
+  const endDay = dateOnly_(end);
+  const winEnd = new Date(endDay.getFullYear(), endDay.getMonth(), endDay.getDate() + 1, 0, 0, 0);
+  const spanDays = Math.round((winEnd.getTime() - winStart.getTime()) / 86400000);
+  if (spanDays > 60) throw new Error('range too wide: max 60 days');
 
-  const calIds = getReadOnlyCalendarIds_();
-  // Include the family calendar in the conflict scan.
-  try {
-    calIds.push(getFamilyCalendarId_());
-  } catch (e) {
-    // family cal not configured; just scan read-only ones.
-  }
-
+  const kidplan = kidplanIds || {};
   const out = [];
-  calIds.forEach((calId) => {
+  (calendarIds || []).forEach((calId) => {
     const cal = CalendarApp.getCalendarById(calId);
     if (!cal) return;
     const calName = cal.getName();
-    const events = cal.getEvents(dayStart, dayEnd);
-    events.forEach((ev) => {
+    cal.getEvents(winStart, winEnd).forEach((ev) => {
+      const evId = ev.getId();
       out.push({
-        calendar: calName,
+        calendar_id: calId,
+        calendar_name: calName,
+        event_id: evId,
         title: ev.getTitle(),
+        all_day: ev.isAllDayEvent(),
         start: ev.isAllDayEvent()
           ? Utilities.formatDate(ev.getAllDayStartDate(), TZ_, 'yyyy-MM-dd')
           : Utilities.formatDate(ev.getStartTime(), TZ_, "yyyy-MM-dd'T'HH:mm:ssXXX"),
-        // getAllDayEndDate is exclusive (day after); subtract a day for inclusive end.
         end: ev.isAllDayEvent()
           ? Utilities.formatDate(new Date(ev.getAllDayEndDate().getTime() - 86400000), TZ_, 'yyyy-MM-dd')
           : Utilities.formatDate(ev.getEndTime(), TZ_, "yyyy-MM-dd'T'HH:mm:ssXXX"),
+        location: ev.getLocation() || '',
+        source: kidplan[evId] ? 'kidplan' : 'external',
       });
     });
   });

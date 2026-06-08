@@ -1,6 +1,6 @@
 # KidPlan - session handoff / status
 
-Last updated: 2026-05-27. Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
+Last updated: 2026-05-29 (Wave 3.5 LIVE @8; Wave 4a code pushed, OAuth scope consented, awaiting deploy + script property + first photo test). Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
 
 ## What this is
 
@@ -10,7 +10,7 @@ Phone-first web app for Tyler + wife Soleil to plan their two kids' summer days.
 
 - Static single-file frontend `web/index.html` (vanilla, no build) -> talks to a GAS JSON API via header-less POST (text/plain, avoids CORS preflight).
 - GAS standalone web app (`gas/`) deployed under `soleilandtyler@gmail.com`, `executeAs USER_DEPLOYING` + `access ANYONE_ANONYMOUS`.
-- Google Sheets = data store (6 tabs). Google Calendar = event writes. Google Drive = photo archive (Wave 4). Cloud Vision = OCR (Wave 4).
+- Google Sheets = data store (5 tabs after Wave 3.5: PlanItems, Library, Tags, Photos, Settings - Days removed). Google Calendar = event writes. Google Drive = photo archive (Wave 4). Cloud Vision = OCR (Wave 4).
 - Auth: shared secret `API_TOKEN` (NOT Google identity - `Session.getActiveUser()` is empty on a personal-Gmail web app). Token entered once per device, stored in localStorage, sent in every request body. Never in the repo/bundle.
 
 ## Key coordinates
@@ -19,10 +19,10 @@ Phone-first web app for Tyler + wife Soleil to plan their two kids' summer days.
 - GAS Script ID: `1FYSj3sQ-ddQgacjWmPnicZ297ufV-Q3aNi4DFSzstkLgZe6LjDnREoFb`
 - Editor: `https://script.google.com/d/1FYSj3sQ-ddQgacjWmPnicZ297ufV-Q3aNi4DFSzstkLgZe6LjDnREoFb/edit`
 - Deployment ID (stable - always redeploy with `-i` this): `AKfycbxJ7oc6WazWnkr0YLrE9S-2c4w04Xz6K4bRgx276EkJPYJN3Z48lnO56QeF9Hlm02ye`
-- `/exec` URL: `https://script.google.com/macros/s/<deploymentId>/exec` (currently @5)
+- `/exec` URL: `https://script.google.com/macros/s/<deploymentId>/exec` (currently @8 - Wave 3.5 live; Wave 4a pushed but not yet deployed).
 - Family calendar ID (script prop `FAMILY_CALENDAR_ID`): `3716c55ac1e5c3159e66479cf85951e662bacb12f4ed00da0cf2d0db86a2cff3@group.calendar.google.com`
-- Script Properties set: `API_TOKEN`, `SHEET_ID`, `FAMILY_CALENDAR_ID`. Optional/unset: `READ_ONLY_CALENDAR_IDS`, `FRONTEND_URL`. Secrets live ONLY in Script Properties.
-- GCP project: still "Default" - must switch to a standard Cloud project before Wave 4 (Vision).
+- Script Properties set: `API_TOKEN`, `SHEET_ID`, `FAMILY_CALENDAR_ID`. Optional/unset: `READ_ONLY_CALENDAR_IDS`, `FRONTEND_URL`. **Needs setting before Wave 4a test:** `PHOTO_DRIVE_FOLDER_ID = 1F1Nfq8_K_zyf0dU_ZfYg_iehcBQLAfXi`. Secrets live ONLY in Script Properties.
+- GCP project: standard Cloud project `kidplan` (project number `444981393891`), Vision API enabled, OAuth consent in Testing mode with soleilandtyler@gmail.com as the only Test user. Apps Script project linked to this GCP project; deployer has consented to the `cloud-vision` scope (verified 2026-05-28).
 
 ## Deploy / dev workflow
 
@@ -32,7 +32,7 @@ cd /Users/tylergeddes/projects/KidPlan/gas
 clasp-soleil push
 clasp-soleil deploy -i AKfycbxJ7oc6WazWnkr0YLrE9S-2c4w04Xz6K4bRgx276EkJPYJN3Z48lnO56QeF9Hlm02ye
 ```
-Editor-run setup/migration functions (no trailing underscore so they show in the Run dropdown), open the file in the editor and pick from the function dropbox: `setupSeedSheet`, `migrateMergeChillIntoIndoor`, `ensureLibraryFallbackPerTag`. clasp can run push/deploy from a non-interactive shell with `clasp_config_auth=~/.clasp-accounts/soleilandtyler.json clasp ...`; editor functions cannot be triggered from the CLI.
+Editor-run setup/migration functions (no trailing underscore so they show in the Run dropdown), open the file in the editor and pick from the function dropbox: `setupSeedSheet`, `migrateDateColumnsToText`, `migrateToBackupsModelV2`. (The old `migrateMergeChillIntoIndoor` and `ensureLibraryFallbackPerTag` were deleted in Wave 3.5.) clasp can run push/deploy from a non-interactive shell with `clasp_config_auth=~/.clasp-accounts/soleilandtyler.json clasp ...`; editor functions cannot be triggered from the CLI.
 
 Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanifest`, `icon-512.png`, `icon-192.png`) to `tgeddes.com/kidplan/` over HTTPS. `API_URL` is baked into `index.html`. NOT yet hosted.
 
@@ -42,21 +42,78 @@ Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanife
 - Wave 3.1 (harden plan-item save, merge chill->indoor, fallback per tag): DONE + migrations run on live sheet.
 - Wave 3.2 (palette C, two-section Library, unified tags): DONE.
 - Wave 3.3 (library-first activity picker: instant-add, inline lane/time, "+ New activity" saves to library, Plan B from picker): DONE.
+- Wave 3.5 (re-alignment - per-activity backups, calendar conflict awareness, schema collapse): LIVE on @8 since 2026-05-28; migration ran on live sheet; two follow-on bugs caught and fixed (time-column auto-coercion + temp-id race on Add backup).
 - PWA icons (coral "K") generated; manifest aligned to palette C.
-- Wave 4 (photo + Cloud Vision OCR reconcile loop): NOT STARTED. Prereqs: switch GCP off "Default", enable Vision API, service-account JSON into `VISION_SERVICE_ACCOUNT_JSON` script prop. `gas/drive.gs` and `gas/vision.gs` are still stubs.
+- Wave 4a (capture + OCR plumbing, raw text view): code PUSHED 2026-05-28; OAuth `cloud-vision` scope CONSENTED by deployer; **not yet deployed**, **`PHOTO_DRIVE_FOLDER_ID` script property not yet set**, and no live test of the camera button yet.
+- Wave 4b (parse OCR text into PlanItem candidates + human-review acceptance UI): NOT STARTED. Depends on first looking at real Wave 4a OCR output to see how readable Vision finds the paper-calendar handwriting.
 - Wave 5 (end-to-end verify on both phones + `simplify` pass): NOT STARTED.
 
-## Just fixed (verify next session) - commit a877b29, deploy @5
+## RIGHT NOW - pick up here after restart (2026-05-29)
 
-Two bugs in the add-activity flow:
-1. All-day calendar events landed one day early. Root cause: `dateOnly_` in `gas/calendar.gs` built the date at midnight local, which TZ conversion rolled back a day (classic GAS all-day off-by-one). Fix: anchor at noon. DEPLOYED.
-2. Added activities did not appear on the Today tab. Root cause: `viewToday()` in `index.html` showed the empty state whenever there was no `Days` row, hiding activities added before a day type was set. Fix: render the populated view when activities exist, with default day fields. Frontend only - needs a refresh / re-host to take effect.
+Stopped mid-Wave-4a so the laptop could restart. Code is on disk and pushed to the Apps Script project; not yet deployed; never tested live.
 
-Verify: open the app on the real current date, "+ Add activity" -> pick a library item -> it should appear under Activities AND create an all-day event on the SAME day in the family calendar.
+Three steps to resume, in order:
+
+1. **Set the photo-folder script property.** In the editor (https://script.google.com/d/1FYSj3sQ-ddQgacjWmPnicZ297ufV-Q3aNi4DFSzstkLgZe6LjDnREoFb/edit) → gear → Project Settings → Script properties → Add script property:
+   - Key: `PHOTO_DRIVE_FOLDER_ID`
+   - Value: `1F1Nfq8_K_zyf0dU_ZfYg_iehcBQLAfXi`
+2. **Deploy.** `cd gas && sh deploy.sh` (or the longer `clasp_config_auth=... clasp deploy -i <STABLE_ID>` form). This bumps the `/exec` from @8 to @9.
+3. **Test the camera button.** Hard-refresh the local `web/index.html`, tap the small camera icon in the Today header. The flow should be: file picker → "Uploading…" modal → "Running OCR…" modal → a modal showing the raw text Vision pulled out of the image. The Drive folder should also have a new file in it.
+
+If OCR text looks usable, that unlocks Wave 4b (parser + structured review UI - takes the raw text and produces PlanItem candidates the user accepts/edits/rejects). If Vision struggles with the handwriting, we know that *now* and can decide whether to add language hints, image preprocessing, or just lean on the raw text as a copy source.
+
+Auth state: the cloud-vision OAuth scope was added to `appsscript.json`, the new scope set was consented to interactively by running an editor function as soleilandtyler@gmail.com (the only Test user on the Testing-mode consent screen for the linked GCP project `kidplan` / `444981393891`). No further reauth should be needed until the scope set changes again.
+
+## Wave 3.5 - shipped LIVE on @8 (2026-05-28)
+
+Tyler redirected the product after the date TZ fix landed: drop the day-level model (day types, plan_a_summary, day-level Plan B), make backups per-activity, surface external calendar events for conflict awareness, and require start times on every activity. Three Opus subagents (code / UX / data-model) audited the codebase and the new plan was committed to `~/.claude/plans/create-an-app-to-eventual-honey.md` (v2).
+
+What landed:
+- `gas/sheets.gs` — drop `Days` from `SHEET_HEADERS_`; PlanItems gains `description`, `is_backup`, `backup_for_id`; `is_backup` registered in `BOOLEAN_COLUMNS_`; deleted the dead one-shots `migrateMergeChillIntoIndoor` + helpers + `ensureLibraryFallbackPerTag`; new editor function `migrateToBackupsModelV2` (idempotent, gated by Settings key `backups_migrated`). Also added module-level `asBool_` helper.
+- `gas/api.gs` — removed `upsert_day` / `list_days` / `delete_day` and their ROUTES; renamed `duplicate_day_to_range` → `duplicate_plan_items_to_range` (preserves backup pairing via id remap); `upsert_plan_item` now requires `start_time`, accepts `is_backup` + `backup_for_id`, validates pairing, drags the paired backup along on primary edits; `delete_plan_item` cascades; new `list_calendar_events({start,end,calendar_ids})` tags each event `source: kidplan|external`; `list_conflicts` is a thin back-compat wrapper; `delete_plan_items_for_date` requires `confirm: true`.
+- `gas/calendar.gs` — `writePlanItemToCalendar_` prefixes `[Backup]` and applies `CalendarApp.EventColor.GRAY` when `is_backup = TRUE`; events are always timed (end defaults to start + 60 min when blank); new range-aware `listCalendarEvents_` returns the shape `list_calendar_events` consumes.
+- `web/index.html` — deleted day editor (open/render/toggle/save), Plan-B-from-picker functions, the header pencil; rebuilt `viewToday` (hero is date + nav only, single timeline with nested backups + external events with `~` glyph and "from <name>" caption); rebuilt `viewWeek` (date + per-activity colored chips + grey ticks for externals, no day stripe); rebuilt `viewLibrary` (single flat list, no two-section split); new "When?" sheet (required start_time + Shared/Elder/Younger toggle) sits between the picker and the save; new `openBackupPicker` flow nests the paired backup under its primary with an `Add backup` ghost button; bottom nav is 4 tabs (Photos demoted to a camera button in the Today header). Library items pre-fill `end_time` from `typical_duration_min` on add. New `addMinutesToTime` + `suggestNextHour_` JS helpers, plus CSS for `.backup-row`, `.add-backup-btn`, `.external-event`, `.week-chip`, `.week-tick`.
+- `docs/data-model.md` — rewritten to match the new 5-tab schema; explicit "Removed tab: Days" footer.
+
+Live status as of 2026-05-28: deployed, migration ran, two follow-on bugs fixed:
+1. Time-column auto-coercion: `start_time` / `end_time` were being stored as fractional-day serials (same class as the date TZ bug); fixed by extending the text-storage approach via `TIME_ONLY_COLUMNS_` + `TEXT_STORED_COLUMNS_`. The existing `migrateDateColumnsToText` editor function now covers time columns too and was re-run.
+2. Temp-id race on `+ Add backup`: the affordance was clickable on an optimistic temp row before the server response replaced the temp id, producing `backup_for_id does not exist: temp_...`. Fixed by hiding the button behind a passive "Saving..." caption while the row is still a temp.
+
+Tyler verified the full flow works end-to-end (primary → backup → calendar). Wave 3.5 is done.
+
+Cleanup owed (not blocking): old test events from pre-3.5 still in the live calendar and sheet.
+
+## Wave 4a - pushed, awaiting deploy + script prop + first test
+
+Code shipped to disk + Apps Script project on 2026-05-28; not yet deployed; not yet tested.
+
+What landed:
+- `gas/appsscript.json` - added `https://www.googleapis.com/auth/cloud-vision` to `oauthScopes`.
+- `gas/drive.gs` - replaced stubs with `getPhotoFolderId_()` (script-prop-first with Settings tab fallback), `uploadPhotoToDrive_(base64, mime, filename)` returning the new Drive file id, `readDriveFileAsBase64_(fileId)` for re-feeding to Vision, and `defaultPhotoName_()` for timestamp-stamped filenames.
+- `gas/vision.gs` - `runVisionOcrOnDriveFile_(driveFileId)` calls the Cloud Vision REST endpoint directly via `UrlFetchApp` using `ScriptApp.getOAuthToken()` as the bearer (no service-account JSON needed). Requests `DOCUMENT_TEXT_DETECTION`, returns `fullTextAnnotation.text` or `''`. Throws on transport / auth / quota errors with the response body trimmed.
+- `gas/api.gs` - new handlers `upload_photo({image_base64, mime_type, name})` (decodes, writes to Drive folder, appends a Photos row, returns it) and `run_photo_ocr({id})` (looks up the Photos row, runs Vision on its `drive_file_id`, persists the result in `ocr_text`, returns updated row). `list_photos` now returns rows sorted by `uploaded_at desc`. `reconcile_photo` still throws "Not implemented until Phase 4b". Routes table updated.
+- `web/index.html` - the camera button in the Today header now calls `openPhotoCapture()` which builds a dynamic file input with `capture=environment` (mobile rear camera) → `onPhotoSelected(file)` reads the file as base64 (via `readFileAsBase64` helper) → POST `upload_photo` → POST `run_photo_ocr` → new modal kind `photoResult` shows the raw OCR text in a scrollable `<pre>` block.
+
+Phase 4b (next) will own: a parser that turns `ocr_text` into structured candidate events `{date, title, start_time, end_time?, kid_hint?, location?, raw}`, a review pane in the frontend that surfaces each candidate as accept / edit / reject, and a `reconcile_photo` handler that upserts accepted candidates via `upsert_plan_item` with `source = 'ocr'` and flips `Photos.reconciled = TRUE` when everything is handled.
+
+OAuth state: the cloud-vision scope was added to `appsscript.json` and the deployer (soleilandtyler@gmail.com) consented interactively by running an editor function. The "Ineligible accounts not added" error and the "Access blocked: app has not completed verification" error both came up during setup and were red herrings (the test user was already on the list; the second was propagation/stale-grant). Both gotchas are now in the vault - see [[apps-script-add-oauth-scope-reauth-flow]].
+
+---
+
+## Previous: TZ date round-trip fix - deploy @6
+
+Date-only columns read back one day early (a day set up for May 27 saved, then displayed on May 26, leaving the real today empty). Root cause: `coerceCellForRead_` in `gas/sheets.gs` formatted date cells with the hardcoded script TZ (`TZ_`, Denver), but `getValues()` builds those Date objects using the spreadsheet's OWN timezone - when the two differ, every stored date shifts. The earlier noon-anchor fix only patched the calendar-write path (`dateOnly_`), never the sheet round-trip. Also found+fixed a latent bug: `upsertRow_` matched the Days `date` key as a string against a Date cell, never matched, and silently appended duplicate Day rows.
+
+Fix (DEPLOYED @6 + migration run on live sheet):
+1. `sheetTz_()` reads the spreadsheet's real TZ (cached); `coerceCellForRead_` formats date-only cells with it, reversing the `getValues()` conversion exactly.
+2. `upsertRow_` + `setupSeedSheet` store/keep date columns as plain text (`@` format) so they never round-trip through a Date again - also fixes the duplicate-Days bug.
+3. New editor migration `migrateDateColumnsToText` converted existing Date cells to text, preserving the visible calendar day. RUN on the live sheet.
+
+Verify: open the app on the real current date. A day type / Plan A summary / Plan B set "today" should appear on today (not yesterday). Then "+ Add activity" -> pick a library item -> it appears under Activities AND creates an all-day event on the SAME day in the family calendar.
 
 ## Cleanup owed
 
-5 duplicate "[Shared] Rainy-day craft kit" test events were created on the wrong day during debugging, plus their `PlanItems` rows (date = the test day). After the fixes, those rows will now show on Today - delete the duplicates via the x button on each activity, and delete the stray calendar events.
+5 duplicate "[Shared] Rainy-day craft kit" test events were created on the wrong day during debugging, plus their `PlanItems` rows. Delete the duplicates via the x button on each activity, and delete the stray calendar events. Also check the `Days` tab for any duplicate rows with the same date (from the pre-fix key-match bug) and remove the stale ones.
 
 ## Gotchas already learned (vault notes exist)
 
@@ -66,3 +123,8 @@ Verify: open the app on the real current date, "+ Add activity" -> pick a librar
 - Trailing-underscore GAS functions are private and hidden from the editor Run dropdown.
 - `Session.getActiveUser()` is empty on a personal-Gmail web app -> token auth instead. (`~/vault/Tools/apps-script-get-active-user-email-empty.md`)
 - GAS all-day events: build the anchor Date at noon to avoid the off-by-one.
+- GAS date-only AND time-only sheet columns: `getValues()` returns Dates built in the SPREADSHEET's timezone, so formatting them back with the script TZ shifts dates by a day / times by hours when the two differ. Store both as text (`@` format) and read them via the spreadsheet's TZ to stay stable. (`~/vault/Tools/google-sheets-type-coercion.md`)
+- Optimistic UI temp-id race: any affordance on an optimistic row that feeds its id back as a server-side foreign key must be hidden until the temp id has been replaced by the saved id. (`~/vault/Patterns/temp-id-race-in-optimistic-ui.md`)
+- Per-activity paired backup via self-referential FK + boolean discriminator. (`~/vault/Patterns/paired-backup-self-referential-fk.md`)
+- Google Calendar eventColor 8 (Graphite) is the only color that reads as muted; use for backup events. (`~/vault/Tools/google-calendar-graphite-event-color.md`)
+- Adding an OAuth scope to a deployed Apps Script: push doesn't trigger reauth - you must run an editor function interactively. "Ineligible accounts not added" usually means the user is already a test user. "Access blocked / verification required" after adding test users is usually propagation delay or a stale partial grant - revoke at myaccount.google.com/permissions to force-clean. (`~/vault/Tools/apps-script-add-oauth-scope-reauth-flow.md`)

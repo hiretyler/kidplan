@@ -204,6 +204,12 @@
       gap: 8px;
       margin-top: 16px;
     }
+    .day-note {
+      margin-top: 12px;
+      font-size: 14px;
+      line-height: 1.45;
+      color: var(--ink-soft);
+    }
     .tag-chip {
       display: inline-flex;
       align-items: center;
@@ -911,6 +917,76 @@
       flex: 1;
       min-width: 0;
     }
+    /* Backup nested under its primary - muted color, smaller, indented. */
+    .backup-row {
+      margin-top: 8px;
+      margin-left: 18px;
+      padding: 8px 10px;
+      background: var(--surface-warm);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+    .backup-label {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-weight: 500; font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--ink-soft);
+    }
+    .backup-title {
+      flex: 1; min-width: 0;
+      color: var(--ink); font-weight: 500; cursor: pointer;
+    }
+    .add-backup-btn {
+      margin-top: 8px; margin-left: 18px;
+      padding: 4px 0;
+      background: none; border: none;
+      color: var(--ink-soft); font-size: 12px;
+      display: inline-flex; align-items: center; gap: 4px;
+      cursor: pointer;
+    }
+    .add-backup-btn:hover { color: var(--accent); }
+    /* External calendar event (read-only) - greyed inline tick in the timeline. */
+    .external-event {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--surface-warm);
+      display: flex; align-items: baseline; gap: 10px;
+      color: var(--ink-soft);
+      font-size: 13px;
+    }
+    .external-time {
+      font-variant-numeric: tabular-nums;
+      min-width: 56px;
+    }
+    .external-title {
+      flex: 1; color: var(--ink); font-weight: 500;
+    }
+    .external-cal {
+      font-size: 11px; color: var(--ink-faint);
+    }
+    /* Week-view per-activity chips and tiny external ticks. */
+    .week-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--surface-warm);
+      font-size: 11px;
+      margin-right: 4px;
+      color: var(--ink);
+    }
+    .week-chip .swatch {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--chip-color, var(--ink-faint));
+    }
+    .week-tick {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--ink-faint);
+      margin-right: 3px;
+      vertical-align: middle;
+    }
     .inline-time-sep { font-size: 12px; color: var(--ink-faint); }
 
     /* ---------- Library picker ---------- */
@@ -1120,6 +1196,36 @@
     function tagClass(tag) {
       return 'c-' + (tag || '').toLowerCase().replace(/\s+/g, '-');
     }
+    // Add minutes to an HH:mm string, clamped to 23:59 (same calendar day).
+    function addMinutesToTime(t, mins) {
+      if (!t) return '';
+      const [h, m] = t.split(':').map(Number);
+      let total = h * 60 + m + mins;
+      if (total >= 24 * 60) total = 24 * 60 - 1;
+      const hh = String(Math.floor(total / 60)).padStart(2, '0');
+      const mm = String(total % 60).padStart(2, '0');
+      return hh + ':' + mm;
+    }
+    // FileReader -> base64 (no data: prefix). Used by the photo-capture flow.
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => {
+          const s = String(fr.result || '');
+          const comma = s.indexOf(',');
+          resolve(comma >= 0 ? s.slice(comma + 1) : s);
+        };
+        fr.onerror = () => reject(new Error('Could not read file'));
+        fr.readAsDataURL(file);
+      });
+    }
+    // Suggest the next round hour as a default start time for the picker.
+    function suggestNextHour_() {
+      const now = new Date();
+      const hr = now.getHours() + (now.getMinutes() > 0 ? 1 : 0);
+      const clamped = hr > 23 ? 9 : hr; // wrap past midnight to 9am
+      return String(clamped).padStart(2, '0') + ':00';
+    }
     // Title-case a hyphenated/spaced tag value for display.
     function tagLabel(tag) {
       if (!tag) return '';
@@ -1202,9 +1308,9 @@
       // Live data cache, populated by loadView().
       data: {
         tags: [],
-        day: null,
-        items: [],
-        weekDays: [],
+        items: [],          // PlanItems on the current day (today view)
+        externals: [],      // external calendar events on the current day/week
+        weekItems: [],      // PlanItems across the visible week
         library: [],
         settings: null
       },
@@ -1273,19 +1379,24 @@
           const v = this.state.currentView;
           if (v === 'today') {
             const date = this.state.currentDate;
-            // Library is needed for Plan B labels and the day editor dropdown.
-            const [days, items, library] = await Promise.all([
-              apiCall('list_days', { start: date, end: date }),
+            // Library powers the picker; calendar events give us conflict awareness.
+            const [items, library, events] = await Promise.all([
               apiCall('list_plan_items', { date }),
-              apiCall('list_library', {})
+              apiCall('list_library', {}),
+              apiCall('list_calendar_events', { start: date, end: date }).catch(() => [])
             ]);
-            this.data.day = (days && days[0]) || null;
             this.data.items = items || [];
             this.data.library = library || [];
+            this.data.externals = (events || []).filter(e => e.source === 'external');
           } else if (v === 'week') {
             const start = parseISO(this.state.weekStart);
             const end = isoDate(addDays(start, 6));
-            this.data.weekDays = await apiCall('list_days', { start: this.state.weekStart, end });
+            const [items, events] = await Promise.all([
+              apiCall('list_plan_items', { start: this.state.weekStart, end }),
+              apiCall('list_calendar_events', { start: this.state.weekStart, end }).catch(() => [])
+            ]);
+            this.data.weekItems = items || [];
+            this.data.externals = (events || []).filter(e => e.source === 'external');
           } else if (v === 'library') {
             this.data.library = await apiCall('list_library', {});
           } else if (v === 'settings') {
@@ -1347,8 +1458,47 @@
         this.render();
       },
 
-      stubPhotoUpload() {
-        this.openModal({ kind: 'info', title: 'Sync paper calendar', body: 'Camera capture and OCR reconciliation land in Wave 4.' });
+      // Camera capture: opens a hidden file input with the mobile camera affordance,
+      // base64-uploads to Drive via the backend, then runs Cloud Vision OCR and
+      // shows the raw text. Structured parsing into PlanItems lands in Phase 4b.
+      openPhotoCapture() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        // capture=environment on a mobile browser opens the rear camera; desktop
+        // ignores it and just shows the file picker.
+        input.setAttribute('capture', 'environment');
+        input.onchange = () => this.onPhotoSelected(input.files && input.files[0]);
+        input.click();
+      },
+
+      async onPhotoSelected(file) {
+        if (!file) return;
+        this.openModal({ kind: 'info', title: 'Uploading…', body: 'Saving photo to Drive.' });
+        try {
+          const base64 = await readFileAsBase64(file);
+          const photo = await apiCall('upload_photo', {
+            image_base64: base64,
+            mime_type: file.type || 'image/jpeg',
+            name: file.name || ''
+          });
+          this.openModal({ kind: 'info', title: 'Running OCR…', body: 'Cloud Vision is reading the photo.' });
+          const updated = await apiCall('run_photo_ocr', { id: photo.id });
+          this.openModal({ kind: 'photoResult', text: updated.ocr_text || '', photo: updated });
+        } catch (e) {
+          this.closeModal();
+          alert('Photo flow failed: ' + e.message);
+        }
+      },
+
+      renderPhotoResult(m) {
+        const txt = m.text && m.text.trim() ? m.text : '(no text detected)';
+        return `
+          ${this.modalHeader('Paper calendar — OCR')}
+          <p style="font-size:13px; color:var(--ink-soft); margin-bottom:10px;">Raw text extracted. Turning this into structured activities lands in the next iteration; for now you can see what Vision pulled out.</p>
+          <pre style="background:var(--surface-warm); padding:12px; border-radius:8px; font-size:12px; white-space:pre-wrap; word-break:break-word; max-height:55vh; overflow-y:auto; font-family: ui-monospace, Menlo, monospace;">${escapeHtml(txt)}</pre>
+          <button class="btn-primary" style="margin-top:14px;" onclick="app.closeModal()">Close</button>
+        `;
       },
 
       // ============================================================
@@ -1384,12 +1534,12 @@
           }
         }
 
-        const canEditDay = this.state.currentView === 'today' && !this.state.loading && !this.state.error;
+        const showCamera = this.state.currentView === 'today' && !this.state.loading && !this.state.error;
         root.innerHTML = `
           <header class="app-header">
             <div class="brand"><span class="dot"></span>KidPlan</div>
             <div class="header-actions">
-              ${canEditDay ? `<button class="icon-btn" onclick="app.openDayEditor()" aria-label="Edit day">${ICONS.pencil}</button>` : ''}
+              ${showCamera ? `<button class="icon-btn" onclick="app.openPhotoCapture()" aria-label="Capture paper calendar">${ICONS.camIcon}</button>` : ''}
             </div>
           </header>
           ${view}
@@ -1441,7 +1591,6 @@
           { id: 'today', label: 'Today', icon: 'calendar' },
           { id: 'week', label: 'Week', icon: 'week' },
           { id: 'library', label: 'Library', icon: 'bookmark' },
-          { id: 'photos', label: 'Photos', icon: 'camera' },
           { id: 'settings', label: 'Settings', icon: 'gear' }
         ];
         nav.innerHTML = `
@@ -1461,12 +1610,13 @@
         if (!m) return '';
         let inner;
         switch (m.kind) {
-          case 'dayEditor': inner = this.renderDayEditor(m); break;
           case 'picker':    inner = this.renderLibraryPicker(m); break;
+          case 'when':      inner = this.renderWhenSheet(m); break;
           case 'planItem':  inner = this.renderPlanItemEditor(m); break;
           case 'duplicate': inner = this.renderDuplicateEditor(m); break;
           case 'library':   inner = this.renderLibraryEditor(m); break;
           case 'tag':       inner = this.renderTagEditor(m); break;
+          case 'photoResult': inner = this.renderPhotoResult(m); break;
           default:          inner = this.renderInfoModal(m); break;
         }
         return `
@@ -1502,110 +1652,10 @@
         `;
       },
 
-      // ---------- Day editor ----------
-      openDayEditor() {
-        const date = this.state.currentDate;
-        const day = this.data.day || { date, primary_tag: this.data.tags[0] ? this.data.tags[0].tag : '', tags: '', plan_b_pointer: 'custom', plan_b_custom_text: '', notes: '', confidence: 'planned', weather_sensitive: false };
-        this.openModal({ kind: 'dayEditor', day });
-      },
-
-      renderDayEditor(m) {
-        const day = m.day;
-        const secondary = splitTags(day.tags).filter(t => t !== day.primary_tag);
-        const pointer = day.plan_b_pointer || 'custom';
-        const libOpts = (this.data.library || []).map(l =>
-          `<option value="${escapeHtml(l.id)}" ${pointer === l.id ? 'selected' : ''}>${escapeHtml(l.name)}</option>`).join('');
-        const fld = 'margin-bottom:14px;';
-        const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
-        const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
-        return `
-          ${this.modalHeader('Edit ' + formatLongDate(parseISO(day.date)))}
-          <div style="${fld}">
-            <label style="${lbl}">Primary tag</label>
-            <select id="de_primary" style="${inp}">${this.tagOptions(day.primary_tag)}</select>
-          </div>
-          <div style="${fld}">
-            <label style="${lbl}">Secondary tags</label>
-            <div style="display:flex; flex-wrap:wrap; gap:8px;">
-              ${this.data.tags.map(t => {
-                if (t.tag === day.primary_tag) return '';
-                const on = secondary.includes(t.tag);
-                return `<button type="button" id="de_sec_${escapeHtml(t.tag)}" class="tag-chip ${on ? 'primary' : 'outlined'} ${tagClass(t.tag)}" data-on="${on ? '1' : '0'}" onclick="app.toggleSecondaryTag('${escapeHtml(t.tag)}')">${escapeHtml(tagLabel(t.tag))}</button>`;
-              }).join('')}
-            </div>
-          </div>
-          <div style="${fld}">
-            <label style="${lbl}">Plan A summary</label>
-            <input id="de_summary" style="${inp}" value="${escapeHtml(day.plan_a_summary || '')}" placeholder="The day's main plan">
-          </div>
-          <div style="${fld}">
-            <label style="${lbl}">Plan B</label>
-            <select id="de_pointer" style="${inp} margin-bottom:8px;" onchange="document.getElementById('de_custom').style.display = this.value==='custom' ? 'block':'none'">
-              <option value="custom" ${pointer === 'custom' ? 'selected' : ''}>Custom text…</option>
-              ${libOpts}
-            </select>
-            <textarea id="de_custom" rows="2" style="${inp} display:${pointer === 'custom' ? 'block' : 'none'};" placeholder="Custom Plan B">${escapeHtml(day.plan_b_custom_text || '')}</textarea>
-          </div>
-          <div style="${fld}">
-            <label style="${lbl}">Notes</label>
-            <textarea id="de_notes" rows="2" style="${inp}" placeholder="Gear, who's driving…">${escapeHtml(day.notes || '')}</textarea>
-          </div>
-          <div style="${fld}">
-            <label style="${lbl}">Confidence</label>
-            <select id="de_conf" style="${inp}">
-              ${['planned','tentative','locked'].map(c => `<option value="${c}" ${day.confidence === c ? 'selected' : ''}>${tagLabel(c)}</option>`).join('')}
-            </select>
-          </div>
-          <label style="display:flex; align-items:center; gap:10px; ${fld} font-size:14px;">
-            <input type="checkbox" id="de_weather" ${asBool(day.weather_sensitive) ? 'checked' : ''} style="width:18px;height:18px;">
-            Weather-sensitive
-          </label>
-          <button class="btn-primary" onclick="app.saveDay()">Save day</button>
-        `;
-      },
-
-      toggleSecondaryTag(tag) {
-        const btn = document.getElementById('de_sec_' + tag);
-        if (!btn) return;
-        const on = btn.getAttribute('data-on') === '1';
-        btn.setAttribute('data-on', on ? '0' : '1');
-        btn.className = 'tag-chip ' + (on ? 'outlined' : 'primary') + ' ' + tagClass(tag);
-      },
-
-      async saveDay() {
-        const primary = document.getElementById('de_primary').value;
-        const secondary = this.data.tags
-          .map(t => t.tag)
-          .filter(t => t !== primary && document.getElementById('de_sec_' + t) && document.getElementById('de_sec_' + t).getAttribute('data-on') === '1');
-        const allTags = [primary].concat(secondary);
-        const pointer = document.getElementById('de_pointer').value;
-        const params = {
-          date: this.state.modal.day.date,
-          primary_tag: primary,
-          tags: allTags.join(','),
-          plan_a_summary: document.getElementById('de_summary').value,
-          plan_b_pointer: pointer,
-          plan_b_custom_text: pointer === 'custom' ? document.getElementById('de_custom').value : '',
-          notes: document.getElementById('de_notes').value,
-          confidence: document.getElementById('de_conf').value,
-          weather_sensitive: document.getElementById('de_weather').checked ? 'TRUE' : 'FALSE'
-        };
-        try {
-          this.data.day = await apiCall('upsert_day', params);
-          this.closeModal();
-          this.loadView();
-        } catch (e) {
-          alert('Could not save: ' + e.message);
-        }
-      },
-
       // ---------- Plan item editor ----------
       openPlanItem(id) {
-        let item;
-        if (id) {
-          item = (this.data.items || []).find(it => it.id === id) || null;
-        }
-        if (!item) item = { id: '', date: this.state.currentDate, kid: 'shared', title: '', start_time: '', end_time: '', location: '', tag: '' };
+        const item = (this.data.items || []).find(it => it.id === id);
+        if (!item) return;
         this.openModal({ kind: 'planItem', item });
       },
 
@@ -1615,8 +1665,9 @@
         const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
         const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
         const lanes = [['shared','Shared'],['elder','Elder'],['younger','Younger']];
+        const isBackup = asBool(it.is_backup);
         return `
-          ${this.modalHeader(it.id ? 'Edit item' : 'Add item')}
+          ${this.modalHeader(isBackup ? 'Edit backup' : 'Edit activity')}
           <div style="${fld}">
             <label style="${lbl}">Lane</label>
             <select id="pi_kid" style="${inp}">
@@ -1628,8 +1679,12 @@
             <input id="pi_title" style="${inp}" value="${escapeHtml(it.title || '')}" placeholder="What's happening">
           </div>
           <div style="display:flex; gap:10px; ${fld}">
-            <div style="flex:1;"><label style="${lbl}">Start</label><input id="pi_start" type="time" style="${inp}" value="${escapeHtml(it.start_time || '')}"></div>
-            <div style="flex:1;"><label style="${lbl}">End</label><input id="pi_end" type="time" style="${inp}" value="${escapeHtml(it.end_time || '')}"></div>
+            <div style="flex:1;"><label style="${lbl}">Start</label><input id="pi_start" type="time" style="${inp}" value="${escapeHtml(it.start_time || '')}" required></div>
+            <div style="flex:1;"><label style="${lbl}">End</label><input id="pi_end" type="time" style="${inp}" value="${escapeHtml(it.end_time || '')}" placeholder="optional"></div>
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Description</label>
+            <textarea id="pi_desc" rows="2" style="${inp}" placeholder="Optional">${escapeHtml(it.description || '')}</textarea>
           </div>
           <div style="${fld}">
             <label style="${lbl}">Location</label>
@@ -1637,29 +1692,33 @@
           </div>
           <div style="${fld}">
             <label style="${lbl}">Tag</label>
-            <select id="pi_tag" style="${inp}"><option value="">(use day's tag)</option>${this.tagOptions(it.tag)}</select>
+            <select id="pi_tag" style="${inp}"><option value="">(none)</option>${this.tagOptions(it.tag)}</select>
           </div>
-          <button class="btn-primary" onclick="app.savePlanItem()">Save item</button>
-          ${it.id ? `<button class="btn-secondary" style="margin-top:10px; color:var(--warn);" onclick="app.deletePlanItem('${escapeHtml(it.id)}')">Delete item</button>` : ''}
+          <button class="btn-primary" onclick="app.savePlanItem()">Save</button>
+          <button class="btn-secondary" style="margin-top:10px; color:var(--warn);" onclick="app.deletePlanItem('${escapeHtml(it.id)}')">Delete${isBackup ? ' backup' : ''}</button>
         `;
       },
 
       async savePlanItem() {
         const it = this.state.modal.item;
         const title = document.getElementById('pi_title').value.trim();
+        const start_time = document.getElementById('pi_start').value;
         if (!title) { alert('Title is required'); return; }
+        if (!start_time) { alert('Start time is required'); return; }
         const params = {
+          id: it.id,
           date: it.date,
           kid: document.getElementById('pi_kid').value,
           title,
-          start_time: document.getElementById('pi_start').value,
+          description: document.getElementById('pi_desc').value,
+          start_time,
           end_time: document.getElementById('pi_end').value,
           location: document.getElementById('pi_loc').value,
-          tag: document.getElementById('pi_tag').value
+          tag: document.getElementById('pi_tag').value,
+          is_backup: asBool(it.is_backup),
+          backup_for_id: it.backup_for_id || ''
         };
-        if (it.id) params.id = it.id;
         try {
-          // Raw envelope so we can surface calendar_warning (row saved, sync failed).
           const res = await apiCallRaw('upsert_plan_item', params);
           this.state.calendarNotice = res.calendar_warning || '';
           this.closeModal();
@@ -1690,19 +1749,34 @@
         }
       },
 
-      // ---------- Library picker (primary add-activity flow) ----------
-      // The low-friction default: pick from the family Library to add to the day.
+      // ---------- Library picker (primary OR backup add) ----------
+      // mode='primary' (default): tapping a library item collects a start time and
+      // creates a primary PlanItem. mode='backup': tapping creates a backup paired
+      // to the given primaryId, with start time pre-filled from the primary.
       openPicker() {
         this.state.pickerFilter = 'all';
         this.state.pickerSearch = '';
-        // Library may not be cached when opening from a no-day state; fetch lazily.
         if (!this.data.library || !this.data.library.length) {
           apiCall('list_library', {}).then(lib => {
             this.data.library = lib || [];
             if (this.state.modal && this.state.modal.kind === 'picker') this.render();
           }).catch(() => {});
         }
-        this.openModal({ kind: 'picker' });
+        this.openModal({ kind: 'picker', mode: 'primary' });
+      },
+
+      openBackupPicker(primaryId) {
+        const primary = (this.data.items || []).find(it => it.id === primaryId);
+        if (!primary) return;
+        // Optimistic temp rows haven't been saved yet; their id can't be a valid
+        // backup_for_id. Tell the user to wait rather than letting the server reject.
+        if (String(primary.id).startsWith('temp_')) {
+          alert('Still saving the activity. Try again in a moment.');
+          return;
+        }
+        this.state.pickerFilter = 'all';
+        this.state.pickerSearch = '';
+        this.openModal({ kind: 'picker', mode: 'backup', primary });
       },
 
       setPickerFilter(tag) {
@@ -1717,12 +1791,9 @@
         if (list) list.innerHTML = this.pickerRowsHtml();
       },
 
-      // Rows only, so search keystrokes do not blow away the focused input.
       pickerRowsHtml() {
         const filter = this.state.pickerFilter;
         const q = (this.state.pickerSearch || '').trim().toLowerCase();
-        const day = this.data.day;
-        const planB = day && day.plan_b_pointer && day.plan_b_pointer !== 'custom' ? day.plan_b_pointer : '';
         let rows = (this.data.library || []);
         if (filter !== 'all') rows = rows.filter(l => l.tag === filter);
         if (q) rows = rows.filter(l => (l.name || '').toLowerCase().includes(q) || (l.description || '').toLowerCase().includes(q));
@@ -1730,7 +1801,6 @@
         const ageLabel = (a) => a === 'both' || a === 'any' ? 'all ages' : a;
         return rows.map(l => {
           const dur = parseInt(l.typical_duration_min, 10);
-          const isB = planB === l.id;
           return `
             <div class="picker-row">
               <div class="name ${tagClass(l.tag)}"><span class="swatch"></span>${escapeHtml(l.name)}</div>
@@ -1740,29 +1810,22 @@
                 <span class="age-pill">${escapeHtml(ageLabel(l.kid_age_fit))}</span>
               </div>
               <div class="picker-actions">
-                <button class="picker-add" onclick="app.pickFromLibrary('${escapeHtml(l.id)}')">${ICONS.plusSm} Add as activity</button>
-                <button class="picker-setb ${isB ? 'is-b' : ''}" onclick="app.setPlanBFromPicker('${escapeHtml(l.id)}')">${ICONS.bookmarkSm} ${isB ? 'Backup' : 'Set as backup'}</button>
+                <button class="picker-add" onclick="app.pickFromLibrary('${escapeHtml(l.id)}')">${ICONS.plusSm} Pick</button>
               </div>
             </div>
           `;
         }).join('');
       },
 
-      renderLibraryPicker() {
+      renderLibraryPicker(m) {
         const sortedTags = [...this.data.tags].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
         const filters = ['all'].concat(sortedTags.map(t => t.tag));
-        const day = this.data.day;
-        const planBId = day && day.plan_b_pointer && day.plan_b_pointer !== 'custom' ? day.plan_b_pointer : '';
-        const planBLib = planBId ? (this.data.library || []).find(l => l.id === planBId) : null;
+        const headerTitle = m && m.mode === 'backup'
+          ? `Backup for: ${escapeHtml(m.primary.title)} (${escapeHtml(formatTime(m.primary.start_time))})`
+          : 'Add activity';
         return `
-          ${this.modalHeader('Add from Library')}
+          ${this.modalHeader(headerTitle)}
           <button class="picker-newbtn" onclick="app.openLibraryEditor('', true)">${ICONS.plusSm} New activity</button>
-          ${planBLib ? `
-            <div class="picker-planb">
-              ${ICONS.bookmarkSm}
-              <span>Backup: <span class="pb-name">${escapeHtml(planBLib.name)}</span></span>
-              <button class="pb-clear" onclick="app.clearPlanBFromPicker()">Clear</button>
-            </div>` : ''}
           <input class="picker-search" placeholder="Search activities" value="${escapeHtml(this.state.pickerSearch || '')}" oninput="app.onPickerSearch(this.value)">
           <div class="filter-bar">
             ${filters.map(f => `
@@ -1776,13 +1839,101 @@
         `;
       },
 
-      // Instant add: optimistic plan item, reconcile on response, surface calendar_warning.
-      async pickFromLibrary(libId) {
+      // Picker tap: swap the modal for the "When?" sheet which collects the
+      // (required) start time + (default Shared) lane before writing the item.
+      pickFromLibrary(libId) {
         const lib = (this.data.library || []).find(l => l.id === libId);
         if (!lib) return;
+        const m = this.state.modal || {};
+        const mode = m.mode || 'primary';
+        const primary = mode === 'backup' ? m.primary : null;
+        const defaultStart = primary
+          ? primary.start_time
+          : suggestNextHour_();
+        this.openModal({
+          kind: 'when',
+          mode,
+          lib,
+          primaryId: primary ? primary.id : '',
+          startTime: defaultStart,
+          kid: primary ? (primary.kid || 'shared') : 'shared'
+        });
+      },
+
+      renderWhenSheet(m) {
+        const fld = 'margin-bottom:14px;';
+        const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
+        const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
+        const lanes = [['shared','Shared'],['elder','Elder'],['younger','Younger']];
+        const title = m.mode === 'backup' ? 'When? (backup)' : 'When?';
+        return `
+          ${this.modalHeader(title)}
+          <div style="margin-bottom:16px;">
+            <div class="${tagClass(m.lib.tag)}" style="font-weight:600; font-size:17px; display:flex; align-items:center; gap:8px;">
+              <span class="swatch" style="width:10px; height:10px; border-radius:50%; background:var(--chip-color, var(--ink-soft));"></span>
+              ${escapeHtml(m.lib.name)}
+            </div>
+            ${m.lib.tag ? `<div style="font-size:13px; color:var(--ink-soft); margin-top:4px;">${escapeHtml(tagLabel(m.lib.tag))}</div>` : ''}
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">Start time *</label>
+            <input id="when_start" type="time" style="${inp}" value="${escapeHtml(m.startTime || '')}" required>
+          </div>
+          <div style="${fld}">
+            <label style="${lbl}">For</label>
+            <div style="display:flex; gap:8px;">
+              ${lanes.map(([v,l]) => `
+                <button type="button" id="when_kid_${v}" class="tag-chip ${m.kid === v ? 'primary' : 'outlined'}"
+                  style="flex:1; justify-content:center; cursor:pointer;"
+                  data-kid="${v}"
+                  onclick="app.setWhenKid('${v}')">${escapeHtml(l)}</button>
+              `).join('')}
+            </div>
+          </div>
+          <button class="btn-primary" onclick="app.confirmAddFromWhen()">${m.mode === 'backup' ? 'Add backup' : 'Add to day'}</button>
+          <div style="font-size:12px; color:var(--ink-soft); margin-top:14px; line-height:1.45;">
+            End time, description, location, ${m.mode === 'backup' ? '' : 'and a backup, '}all editable from the activity row afterward.
+          </div>
+        `;
+      },
+
+      setWhenKid(kid) {
+        const m = this.state.modal;
+        if (!m || m.kind !== 'when') return;
+        m.kid = kid;
+        ['shared','elder','younger'].forEach(v => {
+          const btn = document.getElementById('when_kid_' + v);
+          if (btn) btn.className = 'tag-chip ' + (v === kid ? 'primary' : 'outlined');
+        });
+      },
+
+      // Save from the When sheet. Optimistic insert into this.data.items so the
+      // activity (or backup) appears immediately; reconcile from server response.
+      async confirmAddFromWhen() {
+        const m = this.state.modal;
+        if (!m || m.kind !== 'when') return;
+        const startInput = document.getElementById('when_start');
+        const start_time = startInput ? startInput.value : '';
+        if (!start_time) { alert('Start time is required'); return; }
+        const lib = m.lib;
         const date = this.state.currentDate;
-        const params = { date, kid: 'shared', title: lib.name, start_time: '', end_time: '', location: lib.location || '', tag: lib.tag || '', source: 'manual' };
-        // Optimistic temp row so it shows in the day's list immediately.
+        const dur = parseInt(lib.typical_duration_min, 10);
+        const end_time = !isNaN(dur) && dur > 0
+          ? addMinutesToTime(start_time, dur)
+          : addMinutesToTime(start_time, 60);
+        const params = {
+          date,
+          kid: m.kid || 'shared',
+          title: lib.name,
+          description: lib.description || '',
+          start_time,
+          end_time,
+          location: '',
+          tag: lib.tag || '',
+          source: 'library',
+          is_backup: m.mode === 'backup',
+          backup_for_id: m.mode === 'backup' ? (m.primaryId || '') : ''
+        };
         const tempId = 'temp_' + Date.now();
         this.data.items = (this.data.items || []).concat([Object.assign({ id: tempId }, params)]);
         this.closeModal();
@@ -1790,7 +1941,6 @@
         try {
           const res = await apiCallRaw('upsert_plan_item', params);
           this.state.calendarNotice = res.calendar_warning || '';
-          // Replace the temp row with the saved server row.
           this.data.items = this.data.items.map(it => it.id === tempId ? res.data : it);
           this.render();
         } catch (e) {
@@ -1800,52 +1950,34 @@
         }
       },
 
-      // Set this library activity as the day's Plan B pointer.
-      async setPlanBFromPicker(libId) {
-        const date = this.state.currentDate;
-        const base = this.data.day || { date, primary_tag: this.data.tags[0] ? this.data.tags[0].tag : '' };
-        const params = {
-          date,
-          primary_tag: base.primary_tag,
-          tags: base.tags || base.primary_tag || '',
-          plan_a_summary: base.plan_a_summary || '',
-          plan_b_pointer: libId,
-          plan_b_custom_text: '',
-          notes: base.notes || '',
-          confidence: base.confidence || 'planned',
-          weather_sensitive: asBool(base.weather_sensitive) ? 'TRUE' : 'FALSE'
-        };
-        try {
-          this.data.day = await apiCall('upsert_day', params);
-          this.render();
-        } catch (e) {
-          alert('Could not set backup: ' + e.message);
-        }
-      },
-
-      async clearPlanBFromPicker() {
-        const day = this.data.day;
-        if (!day) return;
-        try {
-          this.data.day = await apiCall('upsert_day', { date: day.date, primary_tag: day.primary_tag, tags: day.tags || '', plan_a_summary: day.plan_a_summary || '', plan_b_pointer: '', plan_b_custom_text: '', notes: day.notes || '', confidence: day.confidence || 'planned', weather_sensitive: asBool(day.weather_sensitive) ? 'TRUE' : 'FALSE' });
-          this.render();
-        } catch (e) {
-          alert('Could not clear backup: ' + e.message);
-        }
-      },
-
       // ---------- Inline activity controls (lane + times, edit in place) ----------
       // Persist a single field change on a day activity via upsert_plan_item.
+      // Start_time is required server-side, so we refuse to clear it inline.
       async updatePlanItemField(id, field, value) {
         const it = (this.data.items || []).find(x => x.id === id);
         if (!it || String(it[field] || '') === String(value || '')) return;
+        if (field === 'start_time' && !value) { alert('Start time is required.'); this.render(); return; }
         const prev = it[field];
         it[field] = value; // optimistic local update
-        const params = { id: it.id, date: it.date, kid: it.kid, title: it.title, start_time: it.start_time || '', end_time: it.end_time || '', location: it.location || '', tag: it.tag || '', source: it.source || 'manual' };
+        const params = {
+          id: it.id, date: it.date, kid: it.kid, title: it.title,
+          description: it.description || '',
+          start_time: it.start_time || '', end_time: it.end_time || '',
+          location: it.location || '', tag: it.tag || '',
+          is_backup: asBool(it.is_backup),
+          backup_for_id: it.backup_for_id || '',
+          source: it.source || 'manual'
+        };
         try {
           const res = await apiCallRaw('upsert_plan_item', params);
           this.state.calendarNotice = res.calendar_warning || '';
           Object.assign(it, res.data);
+          // A primary time edit drags the backup along server-side; refresh so
+          // the paired backup row picks up the new time too.
+          if ((field === 'start_time' || field === 'end_time') && !asBool(it.is_backup)) {
+            this.loadView();
+            return;
+          }
           if (this.state.calendarNotice) this.render();
         } catch (e) {
           it[field] = prev;
@@ -1854,7 +1986,7 @@
         }
       },
 
-      // ---------- Duplicate day to range ----------
+      // ---------- Duplicate this day's activities to a range ----------
       openDuplicate() {
         this.openModal({ kind: 'duplicate' });
       },
@@ -1864,8 +1996,8 @@
         const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
         const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
         return `
-          ${this.modalHeader('Copy day to a range')}
-          <p style="margin-bottom:14px;">Copies ${escapeHtml(formatLongDate(parseISO(start)))} (plan + items) onto every date in the range.</p>
+          ${this.modalHeader('Copy this day to a range')}
+          <p style="margin-bottom:14px;">Copies every activity (and its paired backup) on ${escapeHtml(formatLongDate(parseISO(start)))} onto each date in the range.</p>
           <div style="display:flex; gap:10px; margin-bottom:14px;">
             <div style="flex:1;"><label style="${lbl}">From</label><input id="dup_start" type="date" style="${inp}" value="${escapeHtml(start)}"></div>
             <div style="flex:1;"><label style="${lbl}">To</label><input id="dup_end" type="date" style="${inp}" value="${escapeHtml(start)}"></div>
@@ -1881,8 +2013,8 @@
           range_end: document.getElementById('dup_end').value
         };
         try {
-          const res = await apiCall('duplicate_day_to_range', params);
-          this.openModal({ kind: 'info', title: 'Copied', body: `${res.days_created} day(s) and ${res.plan_items_created} item(s) created.` });
+          const res = await apiCall('duplicate_plan_items_to_range', params);
+          this.openModal({ kind: 'info', title: 'Copied', body: `${res.plan_items_created} item(s) created across ${res.dates_created} date(s).` });
         } catch (e) {
           alert('Could not copy: ' + e.message);
         }
@@ -1903,8 +2035,8 @@
         const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
         const addToDay = this.state.modal && this.state.modal.andAddToDay;
         return `
-          ${this.modalHeader(addToDay ? 'New activity' : (it.id ? 'Edit fallback' : 'Add fallback'))}
-          ${addToDay ? `<p style="margin-bottom:14px;">Saved to your Library and added to today's plan.</p>` : ''}
+          ${this.modalHeader(addToDay ? 'New library activity' : (it.id ? 'Edit activity' : 'Add activity'))}
+          ${addToDay ? `<p style="margin-bottom:14px;">Saves to your Library, then jumps to the When? sheet so you can put it on today's plan.</p>` : ''}
           <div style="${fld}"><label style="${lbl}">Name</label><input id="lib_name" style="${inp}" value="${escapeHtml(it.name || '')}"></div>
           <div style="${fld}"><label style="${lbl}">Tag</label><select id="lib_tag" style="${inp}">${this.tagOptions(it.tag)}</select></div>
           <div style="${fld}"><label style="${lbl}">Description</label><textarea id="lib_desc" rows="2" style="${inp}">${escapeHtml(it.description || '')}</textarea></div>
@@ -1938,15 +2070,22 @@
         const addToDay = this.state.modal && this.state.modal.andAddToDay;
         try {
           const savedLib = await apiCall('upsert_library', params);
-          // Picker path: also add it to the current day as an all-day shared item.
+          // Keep the library cache fresh for the picker.
+          this.data.library = (this.data.library || []).filter(l => l.id !== savedLib.id).concat([savedLib]);
           if (addToDay) {
-            const date = this.state.currentDate;
-            const piParams = { date, kid: 'shared', title: savedLib.name, start_time: '', end_time: '', location: '', tag: savedLib.tag || '', source: 'manual' };
-            const res = await apiCallRaw('upsert_plan_item', piParams);
-            this.state.calendarNotice = res.calendar_warning || '';
+            // Hop straight into the When? sheet for the just-saved item.
+            this.openModal({
+              kind: 'when',
+              mode: 'primary',
+              lib: savedLib,
+              primaryId: '',
+              startTime: suggestNextHour_(),
+              kid: 'shared'
+            });
+          } else {
+            this.closeModal();
+            this.loadView();
           }
-          this.closeModal();
-          this.loadView();
         } catch (e) {
           alert('Could not save: ' + e.message);
         }
@@ -2019,137 +2158,121 @@
       viewToday() {
         const date = this.state.currentDate;
         const items = this.data.items || [];
-        // Show the populated view if a day row exists OR activities exist
-        // (activities can be added before a day type is set). Default day fields
-        // so the populated template renders safely without a Days row.
-        const day = this.data.day || (items.length
-          ? { date: date, primary_tag: '', tags: '', plan_b_pointer: '', plan_b_custom_text: '', notes: '', confidence: 'planned', weather_sensitive: false, plan_a_summary: '' }
-          : null);
+        const externals = this.data.externals || [];
         const d = parseISO(date);
+        const lanes = [['shared','Shared'],['elder','Elder'],['younger','Younger']];
 
-        // Nothing at all for this date yet.
-        if (!day) {
+        const heroAndNav = `
+          <div class="today-hero">
+            <div class="today-date-row"><div class="today-date">${escapeHtml(formatLongDate(d))}</div></div>
+            <div class="day-nav">
+              <button onclick="app.shiftDay(-1)" aria-label="Previous day">${ICONS.chevL}</button>
+              <button onclick="app.shiftDay(1)" aria-label="Next day">${ICONS.chevR}</button>
+              <button class="today-link" onclick="app.goToToday()">Jump to today</button>
+            </div>
+          </div>
+        `;
+
+        // Empty state when nothing is planned and there are no externals to surface.
+        if (!items.length && !externals.length) {
           return `
             <main class="view">
               ${this.calendarNoticeHtml()}
-              <div class="today-hero">
-                <div class="today-date-row"><div class="today-date">${escapeHtml(formatLongDate(d))}</div></div>
-                <div class="day-nav">
-                  <button onclick="app.shiftDay(-1)" aria-label="Previous day">${ICONS.chevL}</button>
-                  <button onclick="app.shiftDay(1)" aria-label="Next day">${ICONS.chevR}</button>
-                  <button class="today-link" onclick="app.goToToday()">Jump to today</button>
-                </div>
-              </div>
+              ${heroAndNav}
               <div class="empty-state" style="text-align:left;">
                 <div style="font-family:var(--font-display); font-weight:600; font-size:17px; color:var(--ink); margin-bottom:4px;">Nothing planned yet</div>
-                <div style="margin-bottom:16px;">Add an activity to put it on the calendar, or set the day's type and backup plan.</div>
+                <div style="margin-bottom:16px;">Tap below to pick something from your Library.</div>
                 <button class="btn-primary" onclick="app.openPicker()">${ICONS.plusSm} Add activity</button>
-                <button class="btn-secondary" style="margin-top:10px;" onclick="app.openDayEditor()">${ICONS.pencil} Set day type / backup plan</button>
                 <div class="sync-hint">
                   ${ICONS.calendar(false)}
-                  <span>Activities sync to the family Google Calendar. Day type and Plan B are planning notes that stay in KidPlan.</span>
+                  <span>Activities and backups sync to the family Google Calendar.</span>
                 </div>
               </div>
             </main>
           `;
         }
 
-        const grouped = { shared: [], elder: [], younger: [] };
-        items.forEach(it => { if (grouped[it.kid]) grouped[it.kid].push(it); });
-        Object.keys(grouped).forEach(k => grouped[k].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || '')));
+        // Pair primaries with their backups for nested rendering.
+        const primaries = items.filter(it => !asBool(it.is_backup));
+        const backupsBy = {};
+        items.filter(it => asBool(it.is_backup)).forEach(b => {
+          if (b.backup_for_id) backupsBy[b.backup_for_id] = b;
+        });
+        primaries.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
-        const lanes = [['shared','Shared'],['elder','Elder'],['younger','Younger']];
-        // Inline-editable row: lane + start/end persist on change; tap title to open full editor.
-        const renderItem = (it) => `
-          <div class="activity-item ${tagClass(it.tag || day.primary_tag)}">
-            <div class="activity-top">
-              <span class="swatch"></span>
-              <span class="title" onclick="app.openPlanItem('${escapeHtml(it.id)}')">${escapeHtml(it.title)}</span>
-              <button class="activity-del" onclick="app.deletePlanItem('${escapeHtml(it.id)}')" aria-label="Remove">${ICONS.x}</button>
+        // Merge primaries + externals into one chronological timeline.
+        const timeline = [];
+        primaries.forEach(p => timeline.push({ kind: 'primary', sort: p.start_time || '', item: p }));
+        externals.forEach(e => {
+          const sortKey = e.all_day ? '00:00' : (String(e.start).slice(11, 16) || '00:00');
+          timeline.push({ kind: 'external', sort: sortKey, item: e });
+        });
+        timeline.sort((a, b) => a.sort.localeCompare(b.sort));
+
+        const laneOptions = (selectedKid, id) =>
+          lanes.map(([v,l]) => `<option value="${v}" ${selectedKid === v ? 'selected' : ''}>${l}</option>`).join('');
+
+        const renderPrimary = (it) => {
+          const backup = backupsBy[it.id];
+          return `
+            <div class="activity-item ${tagClass(it.tag)}">
+              <div class="activity-top">
+                <span class="swatch"></span>
+                <span class="title" onclick="app.openPlanItem('${escapeHtml(it.id)}')">${escapeHtml(it.title)}</span>
+                <button class="activity-del" onclick="app.deletePlanItem('${escapeHtml(it.id)}')" aria-label="Remove">${ICONS.x}</button>
+              </div>
+              <div class="activity-controls">
+                <select class="inline-select" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','kid',this.value)">
+                  ${laneOptions(it.kid)}
+                </select>
+                <input class="inline-time" type="time" value="${escapeHtml(it.start_time || '')}" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','start_time',this.value)">
+                <span class="inline-time-sep">to</span>
+                <input class="inline-time" type="time" value="${escapeHtml(it.end_time || '')}" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','end_time',this.value)">
+              </div>
+              ${backup
+                ? `
+                  <div class="backup-row ${tagClass(backup.tag)}">
+                    <span class="backup-label">${ICONS.bookmarkSm} Backup</span>
+                    <span class="backup-title" onclick="app.openPlanItem('${escapeHtml(backup.id)}')">${escapeHtml(backup.title)}</span>
+                    <button class="activity-del" onclick="app.deletePlanItem('${escapeHtml(backup.id)}')" aria-label="Remove backup">${ICONS.x}</button>
+                  </div>
+                `
+                : (String(it.id).startsWith('temp_')
+                    ? `<span class="add-backup-btn" style="opacity:0.5;">Saving…</span>`
+                    : `<button class="add-backup-btn" onclick="app.openBackupPicker('${escapeHtml(it.id)}')">${ICONS.plusSm} Add backup</button>`)
+              }
             </div>
-            <div class="activity-controls">
-              <select class="inline-select" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','kid',this.value)">
-                ${lanes.map(([v,l]) => `<option value="${v}" ${it.kid === v ? 'selected' : ''}>${l}</option>`).join('')}
-              </select>
-              <input class="inline-time" type="time" value="${escapeHtml(it.start_time || '')}" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','start_time',this.value)">
-              <span class="inline-time-sep">to</span>
-              <input class="inline-time" type="time" value="${escapeHtml(it.end_time || '')}" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','end_time',this.value)">
-            </div>
-          </div>
-        `;
-        const renderGroup = (label, arr) => {
-          if (!arr.length) return '';
-          return `<div class="kid-group"><div class="kid-label">${escapeHtml(label)}</div>${arr.map(renderItem).join('')}</div>`;
+          `;
         };
 
-        const planBLibrary = (day.plan_b_pointer && day.plan_b_pointer !== 'custom')
-          ? (this.data.library || []).find(l => l.id === day.plan_b_pointer)
-          : null;
-
-        let planBHtml;
-        if (planBLibrary) {
-          planBHtml = `
-            <div class="plan-b-content" onclick="app.navigate('library')">
-              <div class="body"><div class="name">${escapeHtml(planBLibrary.name)}</div><div class="desc">${escapeHtml(planBLibrary.description)}</div></div>
-              <div class="chevron">${ICONS.chevR}</div>
-            </div>`;
-        } else if (day.plan_b_pointer && day.plan_b_pointer !== 'custom') {
-          // Pointer references a library id we have not loaded into the cache.
-          planBHtml = `<div class="plan-b-content"><div class="body"><div class="desc">Linked fallback (open Library to view).</div></div></div>`;
-        } else if (day.plan_b_custom_text) {
-          planBHtml = `<div class="plan-b-content"><div class="body"><div class="desc" style="font-size:14px; color:var(--ink);">${escapeHtml(day.plan_b_custom_text)}</div></div></div>`;
-        } else {
-          planBHtml = `<div class="plan-b-content"><div class="body"><div class="desc">No Plan B set yet.</div></div></div>`;
-        }
-
-        const dayTags = splitTags(day.tags);
-        const otherTags = dayTags.filter(t => t !== day.primary_tag);
+        const renderExternal = (ev) => {
+          const timeLabel = ev.all_day ? 'all day' : formatTime(String(ev.start).slice(11, 16));
+          return `
+            <div class="external-event">
+              <span class="external-time">${escapeHtml(timeLabel)}</span>
+              <span class="external-title">${escapeHtml(ev.title || '(untitled)')}</span>
+              <span class="external-cal">from ${escapeHtml(ev.calendar_name)}</span>
+            </div>
+          `;
+        };
 
         return `
           <main class="view">
             ${this.calendarNoticeHtml()}
-            <div class="today-hero ${tagClass(day.primary_tag)}">
-              <div class="today-date-row">
-                <div class="today-date">${escapeHtml(formatLongDate(d))}</div>
-                ${asBool(day.weather_sensitive) ? `<div class="today-weather">${ICONS.rain} weather-sensitive</div>` : ''}
-              </div>
-              <div class="day-nav">
-                <button onclick="app.shiftDay(-1)" aria-label="Previous day">${ICONS.chevL}</button>
-                <button onclick="app.shiftDay(1)" aria-label="Next day">${ICONS.chevR}</button>
-                <button class="today-link" onclick="app.goToToday()">Jump to today</button>
-              </div>
-              <div class="tag-row">
-                <span class="tag-chip primary ${tagClass(day.primary_tag)}">${escapeHtml(tagLabel(day.primary_tag))}</span>
-                ${otherTags.map(t => `<span class="tag-chip outlined ${tagClass(t)}"><span class="swatch"></span>${escapeHtml(tagLabel(t))}</span>`).join('')}
-              </div>
-            </div>
+            ${heroAndNav}
 
             <section class="plan-section">
-              <h3>Activities <span class="label-pill">calendar</span></h3>
-              ${items.length
-                ? renderGroup('Shared', grouped.shared) + renderGroup('Elder', grouped.elder) + renderGroup('Younger', grouped.younger)
-                : (day.plan_a_summary
-                    ? `<div class="plan-item"><div class="body"><div class="title" style="color:var(--ink-soft); font-weight:400;">${escapeHtml(day.plan_a_summary)}</div></div></div>`
-                    : `<div class="plan-item"><div class="body"><div class="title" style="color:var(--ink-soft); font-weight:400;">No activities yet</div></div></div>`)
-              }
+              <h3>Today <span class="label-pill">calendar</span></h3>
+              ${timeline.map(t => t.kind === 'primary' ? renderPrimary(t.item) : renderExternal(t.item)).join('')}
               <button class="link-btn" onclick="app.openPicker()">+ Add activity</button>
-            </section>
-
-            <section class="plan-section">
-              <h3>Plan B <span class="label-pill b">backup</span></h3>
-              ${planBHtml}
             </section>
 
             <div class="sync-hint">
               ${ICONS.calendar(false)}
-              <span>Activities sync to the family Google Calendar. Day type and Plan B are planning notes that stay in KidPlan.</span>
+              <span>Activities and backups sync to the family Google Calendar. External events are read-only.</span>
             </div>
 
-            <div class="cta-row">
-              <button class="btn-primary" onclick="app.openPicker()">${ICONS.plusSm} Add activity</button>
-              <button class="btn-secondary" onclick="app.openDayEditor()">${ICONS.pencil} Set day type / backup plan</button>
-              <button class="btn-secondary" onclick="app.openDuplicate()">${ICONS.calendar(false)} Copy this day to a date range</button>
-            </div>
+            <button class="btn-secondary" style="margin-top:14px;" onclick="app.openDuplicate()">${ICONS.calendar(false)} Copy this day to a date range</button>
           </main>
         `;
       },
@@ -2160,11 +2283,18 @@
       viewWeek() {
         const start = parseISO(this.state.weekStart);
         const dates = Array.from({length: 7}, (_, i) => isoDate(addDays(start, i)));
-        // Merge live day rows onto the 7-day skeleton (missing days render empty).
-        const byDate = {};
-        (this.data.weekDays || []).forEach(x => { byDate[x.date] = x; });
-        const days = dates.map(d => byDate[d] || { date: d, primary_tag: null, tags: '', plan_a_summary: '', weather_sensitive: false, plan_b_pointer: null });
         const todayIso = isoDate(new Date());
+        const itemsByDate = {};
+        (this.data.weekItems || []).forEach(it => {
+          if (!itemsByDate[it.date]) itemsByDate[it.date] = [];
+          itemsByDate[it.date].push(it);
+        });
+        const externalsByDate = {};
+        (this.data.externals || []).forEach(ev => {
+          const d = ev.all_day ? ev.start : String(ev.start).slice(0, 10);
+          if (!externalsByDate[d]) externalsByDate[d] = [];
+          externalsByDate[d].push(ev);
+        });
 
         return `
           <main class="view">
@@ -2176,16 +2306,20 @@
             <div class="week-sub"><a onclick="app.goToToday()" style="cursor:pointer;">Jump to today</a></div>
 
             <div class="week-list">
-              ${days.map(day => {
-                const d = parseISO(day.date);
-                const tags = splitTags(day.tags);
-                const indoor = tags.includes('indoor');
-                const outdoor = tags.includes('outdoor');
-                const isToday = day.date === todayIso;
-                const isPlanBCustom = day.plan_b_pointer === 'custom';
-                const isPlanBLibrary = day.plan_b_pointer && day.plan_b_pointer !== 'custom';
+              ${dates.map(dateIso => {
+                const d = parseISO(dateIso);
+                const isToday = dateIso === todayIso;
+                const dayItems = (itemsByDate[dateIso] || []);
+                const primaries = dayItems
+                  .filter(it => !asBool(it.is_backup))
+                  .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+                const backups = dayItems.filter(it => asBool(it.is_backup));
+                const externals = externalsByDate[dateIso] || [];
+                const summary = !primaries.length && !externals.length
+                  ? '— no plans —'
+                  : primaries.map(p => p.title).join(' · ') || `${externals.length} external event${externals.length === 1 ? '' : 's'}`;
                 return `
-                  <button class="day-row ${day.primary_tag ? tagClass(day.primary_tag) : ''} ${isToday ? 'today' : ''}" onclick="app.jumpToDay('${day.date}')">
+                  <button class="day-row ${isToday ? 'today' : ''}" onclick="app.jumpToDay('${dateIso}')">
                     <div class="stripe"></div>
                     <div class="day-content">
                       <div class="date-block">
@@ -2193,16 +2327,10 @@
                         <div class="dom">${d.getDate()}</div>
                       </div>
                       <div class="summary">
-                        <div class="primary-line">${escapeHtml(day.plan_a_summary || '— no plan yet —')}</div>
-                        <div class="tag-line">${tags.map(t => escapeHtml(tagLabel(t).toLowerCase())).join(' · ') || '&nbsp;'}</div>
+                        <div class="primary-line">${escapeHtml(summary)}</div>
+                        <div class="tag-line">${primaries.map(p => `<span class="week-chip ${tagClass(p.tag)}"><span class="swatch"></span>${escapeHtml(p.title)}</span>`).join('')}${externals.map(() => `<span class="week-tick"></span>`).join('')}</div>
                       </div>
-                      <div class="icons">
-                        ${asBool(day.weather_sensitive) ? ICONS.rain : ''}
-                        ${indoor && !outdoor ? ICONS.indoor : ''}
-                        ${outdoor && !indoor ? ICONS.outdoor : ''}
-                        ${isPlanBLibrary ? ICONS.bookmarkSm : ''}
-                        ${isPlanBCustom ? ICONS.penSm : ''}
-                      </div>
+                      <div class="icons">${backups.length ? `${ICONS.bookmarkSm}<span style="font-size:11px;">${backups.length}</span>` : ''}</div>
                     </div>
                   </button>
                 `;
@@ -2218,57 +2346,38 @@
       viewLibrary() {
         const filter = this.state.libraryFilter;
         const all = this.data.library || [];
-        const items = filter === 'all' ? all : all.filter(i => i.tag === filter);
+        const items = (filter === 'all' ? all : all.filter(i => i.tag === filter))
+          .slice()
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-        // Build filters from the loaded tag set (display_order).
         const sortedTags = [...this.data.tags].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
         const filters = ['all'].concat(sortedTags.map(t => t.tag));
-
         const ageLabel = (a) => a === 'both' || a === 'any' ? 'all ages' : a;
 
-        // Split by typical duration: > 180 min are main outings, <= 180 (or blank) are additional.
-        const durationMin = (it) => {
-          const n = parseInt(it.typical_duration_min, 10);
-          return isNaN(n) ? 0 : n;
-        };
-        const mainItems = items.filter(it => durationMin(it) > 180);
-        const additionalItems = items.filter(it => durationMin(it) <= 180);
-
-        const renderCard = (it) => `
-          <button class="library-card" style="width:100%;text-align:left;background:var(--surface);" onclick="app.openLibraryEditor('${escapeHtml(it.id)}')">
-            <div class="top">
-              <div class="name ${tagClass(it.tag)}">
-                <span class="swatch"></span>
-                ${escapeHtml(it.name)}
-              </div>
-              <div class="meta">
-                ${asBool(it.indoor) ? ICONS.indoor : ICONS.outdoor}
-                <span class="age-pill">${escapeHtml(ageLabel(it.kid_age_fit))}</span>
-              </div>
-            </div>
-            ${it.description ? `<div class="desc">${escapeHtml(it.description)}</div>` : ''}
-          </button>
-        `;
-
-        // Hide a section header entirely when it has no matching items.
-        const renderSection = (title, hint, arr) => {
-          if (!arr.length) return '';
+        const renderCard = (it) => {
+          const dur = parseInt(it.typical_duration_min, 10);
           return `
-            <div class="library-section-head">
-              <span class="title">${escapeHtml(title)}</span>
-              <span class="count">${arr.length}</span>
-              <span class="hint">${escapeHtml(hint)}</span>
-            </div>
-            ${arr.map(renderCard).join('')}
+            <button class="library-card" style="width:100%;text-align:left;background:var(--surface);" onclick="app.openLibraryEditor('${escapeHtml(it.id)}')">
+              <div class="top">
+                <div class="name ${tagClass(it.tag)}">
+                  <span class="swatch"></span>
+                  ${escapeHtml(it.name)}
+                </div>
+                <div class="meta">
+                  ${asBool(it.indoor) ? ICONS.indoor : ICONS.outdoor}
+                  ${!isNaN(dur) ? `<span style="font-size:12px;color:var(--ink-soft);">${dur} min</span>` : ''}
+                  <span class="age-pill">${escapeHtml(ageLabel(it.kid_age_fit))}</span>
+                </div>
+              </div>
+              ${it.description ? `<div class="desc">${escapeHtml(it.description)}</div>` : ''}
+            </button>
           `;
         };
-
-        const hasAny = mainItems.length || additionalItems.length;
 
         return `
           <main class="view">
             <h2 class="view-title">Library</h2>
-            <div class="view-sub">Fallback activities for sick days, weather flips, and "nothing to do" afternoons.</div>
+            <div class="view-sub">Activities you can pull into a day.</div>
 
             <div class="filter-bar">
               ${filters.map(f => `
@@ -2280,14 +2389,13 @@
             </div>
 
             <div class="library-list">
-              ${hasAny ? `
-                ${renderSection('Main Activities', 'half-day +', mainItems)}
-                ${renderSection('Additional Activities', '3 hrs or less', additionalItems)}
-              ` : `<div class="empty-state">No fallbacks match this filter.</div>`}
+              ${items.length
+                ? items.map(renderCard).join('')
+                : `<div class="empty-state">No activities match this filter.</div>`}
             </div>
           </main>
 
-          <button class="fab" onclick="app.openLibraryEditor()" aria-label="Add fallback">${ICONS.plus}</button>
+          <button class="fab" onclick="app.openLibraryEditor()" aria-label="Add activity">${ICONS.plus}</button>
         `;
       },
 
@@ -2374,7 +2482,7 @@
               </div>
               <div class="settings-row">
                 <span class="label">Build</span>
-                <span class="value">Wave 3 - live</span>
+                <span class="value">Wave 3.5 - live</span>
               </div>
             </div>
           </main>

@@ -13,58 +13,67 @@ const ping = (params) => ({
   version: VERSION,
 });
 
-// Days are date-keyed. start/end are inclusive yyyy-MM-dd bounds.
-const list_days = (params) => {
-  const rows = getRows_('Days');
+// PlanItems by date or inclusive [start,end] range. Returns primaries + backups.
+// The frontend pairs them via backup_for_id and renders backups nested.
+const list_plan_items = (params) => {
+  const date = params && params.date;
   const start = params && params.start;
   const end = params && params.end;
-  const filtered = rows.filter((r) => {
-    if (!r.date) return false;
+  const rows = getRows_('PlanItems').filter((r) => {
+    if (date) return r.date === date;
     if (start && r.date < start) return false;
     if (end && r.date > end) return false;
     return true;
   });
-  return { ok: true, data: filtered };
+  return { ok: true, data: rows };
 };
 
-const upsert_day = (params) => {
+// Wipe every PlanItem on a date (primaries + their backups + calendar events).
+// Requires confirm:true so a stray call cannot blow away a day.
+const delete_plan_items_for_date = (params) => {
   if (!params || !params.date) throw new Error('date is required');
-  const saved = upsertRow_('Days', 'date', params);
-  return { ok: true, data: saved };
-};
-
-// Cascade-delete: remove the Day, then its PlanItems and their calendar events.
-const delete_day = (params) => {
-  if (!params || !params.date) throw new Error('date is required');
-  const date = params.date;
-  const items = getRows_('PlanItems').filter((it) => it.date === date);
+  if (params.confirm !== true) throw new Error('confirm:true is required');
+  const items = getRows_('PlanItems').filter((it) => it.date === params.date);
   items.forEach((it) => {
     deletePlanItemFromCalendar_(it);
     deleteRow_('PlanItems', 'id', it.id);
   });
-  const removed = deleteRow_('Days', 'date', date);
-  return { ok: true, data: { deleted: removed, plan_items_deleted: items.length } };
+  return { ok: true, data: { plan_items_deleted: items.length } };
 };
 
-const list_plan_items = (params) => {
-  const date = params && params.date;
-  const rows = getRows_('PlanItems').filter((r) => !date || r.date === date);
-  return { ok: true, data: rows };
-};
-
-// Upsert the row, mirror to calendar, store the event id back, return saved row.
+// Upsert a PlanItem, mirror to calendar, store the event id back. For primaries
+// editing start_time/date also pulls the paired backup's time forward
+// (writePlanItemToCalendar_ handles the calendar side; the backup's row is
+// patched here so subsequent reads stay consistent).
 const upsert_plan_item = (params) => {
   if (!params || !params.date || !params.title) {
     throw new Error('date and title are required');
   }
+  if (!params.start_time) throw new Error('start_time is required');
+
   const item = {};
   for (const k in params) item[k] = params[k];
   if (!item.id) item.id = genId_();
   if (!item.source) item.source = 'manual';
+  // Normalize the backup pairing fields so blanks land in the sheet, not 'undefined'.
+  item.is_backup = item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true';
+  if (item.is_backup) {
+    if (!item.backup_for_id) throw new Error('backup_for_id is required for a backup');
+    const primary = getRowByKey_('PlanItems', 'id', item.backup_for_id);
+    if (!primary) throw new Error('backup_for_id does not exist: ' + item.backup_for_id);
+    if (asBool_(primary.is_backup)) throw new Error('cannot chain a backup onto another backup');
+  } else {
+    item.backup_for_id = '';
+  }
 
-  // First write so the row exists, then sync calendar, then persist event id.
-  // The row must always persist; a calendar failure becomes a soft warning.
+  // Detect a primary-time change so we can re-sync the paired backup afterward.
+  let priorPrimary = null;
+  if (!item.is_backup) {
+    priorPrimary = getRowByKey_('PlanItems', 'id', item.id);
+  }
+
   let saved = upsertRow_('PlanItems', 'id', item);
+  let calendarWarning = '';
   try {
     const eventId = writePlanItemToCalendar_(saved);
     if (eventId && eventId !== saved.gcal_event_id) {
@@ -72,70 +81,135 @@ const upsert_plan_item = (params) => {
       saved = upsertRow_('PlanItems', 'id', saved);
     }
   } catch (err) {
-    return { ok: true, data: saved, calendar_warning: err.message };
+    calendarWarning = err.message;
   }
+
+  // If a primary's date/start/end shifted, drag the paired backup along so the
+  // calendar pairing stays meaningful.
+  if (priorPrimary && !item.is_backup) {
+    const shifted =
+      priorPrimary.date !== saved.date ||
+      priorPrimary.start_time !== saved.start_time ||
+      priorPrimary.end_time !== saved.end_time;
+    if (shifted) {
+      const backup = getRows_('PlanItems').find((p) => asBool_(p.is_backup) && p.backup_for_id === saved.id);
+      if (backup) {
+        const patch = {
+          id: backup.id,
+          date: saved.date,
+          start_time: saved.start_time,
+          end_time: saved.end_time,
+        };
+        let savedBackup = upsertRow_('PlanItems', 'id', patch);
+        try {
+          const eventId = writePlanItemToCalendar_(savedBackup);
+          if (eventId && eventId !== savedBackup.gcal_event_id) {
+            savedBackup.gcal_event_id = eventId;
+            upsertRow_('PlanItems', 'id', savedBackup);
+          }
+        } catch (err) {
+          if (!calendarWarning) calendarWarning = 'backup sync failed: ' + err.message;
+        }
+      }
+    }
+  }
+
+  if (calendarWarning) return { ok: true, data: saved, calendar_warning: calendarWarning };
   return { ok: true, data: saved };
 };
 
+// Delete a PlanItem. If it is a primary, cascade to its paired backup
+// (calendar event + row) first so we never leave an orphan backup.
 const delete_plan_item = (params) => {
   if (!params || !params.id) throw new Error('id is required');
   const row = getRowByKey_('PlanItems', 'id', params.id);
   if (!row) return { ok: true, data: { deleted: false } };
+  let backupDeleted = false;
+  if (!asBool_(row.is_backup)) {
+    const backup = getRows_('PlanItems').find((p) => asBool_(p.is_backup) && p.backup_for_id === row.id);
+    if (backup) {
+      deletePlanItemFromCalendar_(backup);
+      deleteRow_('PlanItems', 'id', backup.id);
+      backupDeleted = true;
+    }
+  }
   deletePlanItemFromCalendar_(row);
   const removed = deleteRow_('PlanItems', 'id', params.id);
-  return { ok: true, data: { deleted: removed } };
+  return { ok: true, data: { deleted: removed, backup_deleted: backupDeleted } };
 };
 
-// Copy a source Day + its PlanItems to each date in the inclusive range.
-// Skips source_date if it falls inside the range. New items get new ids/events.
-const duplicate_day_to_range = (params) => {
+// Copy the PlanItems on source_date (primaries + their paired backups) to each
+// date in the inclusive range. Skips source_date if it falls inside the range.
+// New ids are minted; backup_for_id is rewritten to the new primary's id so the
+// pairing carries over. Calendar events are fresh.
+const duplicate_plan_items_to_range = (params) => {
   if (!params || !params.source_date || !params.range_start || !params.range_end) {
     throw new Error('source_date, range_start, range_end are required');
   }
-  const sourceDay = getRowByKey_('Days', 'date', params.source_date);
-  if (!sourceDay) throw new Error('source day not found: ' + params.source_date);
   const sourceItems = getRows_('PlanItems').filter((it) => it.date === params.source_date);
+  if (!sourceItems.length) throw new Error('no plan items on source_date: ' + params.source_date);
 
   const targets = datesInRange_(params.range_start, params.range_end).filter(
     (d) => d !== params.source_date
   );
 
+  const primaries = sourceItems.filter((it) => !asBool_(it.is_backup));
+  const backupsByPrimary = {};
+  sourceItems.filter((it) => asBool_(it.is_backup)).forEach((b) => {
+    if (b.backup_for_id) backupsByPrimary[b.backup_for_id] = b;
+  });
+
   let created = 0;
   let calendarWarning = '';
   targets.forEach((targetDate) => {
-    // Copy the Day row (preserve plan fields, retarget the date).
-    const dayCopy = {};
-    for (const k in sourceDay) dayCopy[k] = sourceDay[k];
-    dayCopy.date = targetDate;
-    delete dayCopy.updated_at;
-    upsertRow_('Days', 'date', dayCopy);
-
-    // Copy each PlanItem with a fresh id + fresh calendar event.
-    sourceItems.forEach((it) => {
-      const itemCopy = {};
-      for (const k in it) itemCopy[k] = it[k];
-      itemCopy.id = genId_();
-      itemCopy.date = targetDate;
-      itemCopy.gcal_event_id = '';
-      delete itemCopy.updated_at;
-      const saved = upsertRow_('PlanItems', 'id', itemCopy);
-      // Best-effort calendar sync; a failure must not lose the row or abort the loop.
-      try {
-        const eventId = writePlanItemToCalendar_(saved);
-        if (eventId) {
-          saved.gcal_event_id = eventId;
-          upsertRow_('PlanItems', 'id', saved);
-        }
-      } catch (err) {
-        if (!calendarWarning) calendarWarning = err.message;
-      }
+    primaries.forEach((p) => {
+      const primaryCopy = copyForDate_(p, targetDate, '');
+      const savedPrimary = syncCopy_(primaryCopy, (w) => { if (w && !calendarWarning) calendarWarning = w; });
       created++;
+      const backup = backupsByPrimary[p.id];
+      if (backup) {
+        const backupCopy = copyForDate_(backup, targetDate, savedPrimary.id);
+        syncCopy_(backupCopy, (w) => { if (w && !calendarWarning) calendarWarning = w; });
+        created++;
+      }
     });
   });
-  const result = { days_created: targets.length, plan_items_created: created };
+  const result = { dates_created: targets.length, plan_items_created: created };
   if (calendarWarning) return { ok: true, data: result, calendar_warning: calendarWarning };
   return { ok: true, data: result };
 };
+
+// Helpers shared by duplicate_plan_items_to_range. Kept local to api.gs.
+function copyForDate_(src, targetDate, newBackupForId) {
+  const copy = {};
+  for (const k in src) copy[k] = src[k];
+  copy.id = genId_();
+  copy.date = targetDate;
+  copy.gcal_event_id = '';
+  copy.source = 'duplicate';
+  if (asBool_(src.is_backup)) {
+    copy.is_backup = true;
+    copy.backup_for_id = newBackupForId;
+  } else {
+    copy.is_backup = false;
+    copy.backup_for_id = '';
+  }
+  delete copy.updated_at;
+  return copy;
+}
+function syncCopy_(copy, onWarn) {
+  let saved = upsertRow_('PlanItems', 'id', copy);
+  try {
+    const eventId = writePlanItemToCalendar_(saved);
+    if (eventId) {
+      saved.gcal_event_id = eventId;
+      saved = upsertRow_('PlanItems', 'id', saved);
+    }
+  } catch (e) {
+    onWarn(e.message);
+  }
+  return saved;
+}
 
 const list_library = (_params) => ({ ok: true, data: getRows_('Library') });
 
@@ -162,15 +236,77 @@ const upsert_tag = (params) => {
   return { ok: true, data: saved };
 };
 
-// Conflict-awareness: events on a date across read-only + family calendars.
-const list_conflicts = (params) => {
-  if (!params || !params.date) throw new Error('date is required');
-  return { ok: true, data: listConflictingEvents_(params.date) };
+// Calendar awareness: events in [start,end] (inclusive yyyy-MM-dd) across the
+// family calendar + each READ_ONLY_CALENDAR_IDS entry. Each event is tagged
+// source='kidplan' if its event id matches a known PlanItems.gcal_event_id,
+// else 'external'. By default the frontend filters out kidplan-source events
+// (we render those from PlanItems directly) but the round-trip is here if a
+// view wants both.
+const list_calendar_events = (params) => {
+  const p = params || {};
+  if (!p.start || !p.end) throw new Error('start and end are required (yyyy-MM-dd)');
+  const calIds = (p.calendar_ids && p.calendar_ids.length)
+    ? p.calendar_ids
+    : defaultCalendarIds_();
+  const kidplanIds = {};
+  getRows_('PlanItems').forEach((r) => { if (r.gcal_event_id) kidplanIds[r.gcal_event_id] = true; });
+  return { ok: true, data: listCalendarEvents_(p.start, p.end, calIds, kidplanIds) };
 };
 
-const request_photo_upload = (_params) => ({ ok: true, data: { upload_url: null, session_id: null } });
-const list_photos = (_params) => ({ ok: true, data: [] });
-const reconcile_photo = (_params) => { throw new Error('Not implemented in Wave 1'); };
+// Single-date wrapper retained for compatibility with any older client.
+const list_conflicts = (params) => {
+  if (!params || !params.date) throw new Error('date is required');
+  return list_calendar_events({ start: params.date, end: params.date });
+};
+
+function defaultCalendarIds_() {
+  const out = getReadOnlyCalendarIds_();
+  try { out.push(getFamilyCalendarId_()); } catch (e) { /* family cal not configured */ }
+  return out;
+}
+
+// Wave 4: photo capture + OCR.
+// upload_photo: base64-decode and drop into the family Drive folder, append a
+// Photos row, return it. Frontend follows up with run_photo_ocr.
+const upload_photo = (params) => {
+  if (!params || !params.image_base64) throw new Error('image_base64 is required');
+  const mime = params.mime_type || 'image/jpeg';
+  const filename = params.name || ('paper-calendar-' + Utilities.formatDate(new Date(), TZ_, 'yyyy-MM-dd-HHmmss') + '.jpg');
+  const driveFileId = uploadPhotoToDrive_(params.image_base64, mime, filename);
+  const row = {
+    id: genId_(),
+    drive_file_id: driveFileId,
+    uploaded_at: Utilities.formatDate(new Date(), TZ_, "yyyy-MM-dd'T'HH:mm:ssXXX"),
+    covers_date_range_start: params.covers_date_range_start || '',
+    covers_date_range_end: params.covers_date_range_end || '',
+    ocr_text: '',
+    parsed_json: '',
+    reconciled: false,
+  };
+  const saved = upsertRow_('Photos', 'id', row);
+  return { ok: true, data: saved };
+};
+
+// Run Cloud Vision OCR on the Photos row's Drive file, persist the raw text.
+// Phase 4b will add parsing + structured reconciliation on top of this.
+const run_photo_ocr = (params) => {
+  if (!params || !params.id) throw new Error('id is required');
+  const row = getRowByKey_('Photos', 'id', params.id);
+  if (!row) throw new Error('photo not found: ' + params.id);
+  if (!row.drive_file_id) throw new Error('photo row has no drive_file_id');
+  const text = runVisionOcrOnDriveFile_(row.drive_file_id);
+  const updated = upsertRow_('Photos', 'id', { id: row.id, ocr_text: text });
+  return { ok: true, data: updated };
+};
+
+const list_photos = (_params) => ({
+  ok: true,
+  data: getRows_('Photos').sort((a, b) => String(b.uploaded_at || '').localeCompare(String(a.uploaded_at || ''))),
+});
+
+// Phase 4b will own this: convert ocr_text into PlanItem candidates and let
+// the user accept/edit/reject each one.
+const reconcile_photo = (_params) => { throw new Error('Not implemented until Phase 4b'); };
 
 // Keys the API is allowed to read/write. Secrets are never exposed.
 const EDITABLE_SETTING_KEYS_ = ['family_calendar_id', 'read_only_calendar_ids', 'photo_drive_folder_id'];
@@ -224,20 +360,20 @@ function datesInRange_(start, end) {
 // Action -> handler. ping is unauthenticated; everything else is wrapped.
 const ROUTES = {
   ping: ping,
-  list_days: withAuth_(list_days),
-  upsert_day: withAuth_(upsert_day),
-  delete_day: withAuth_(delete_day),
   list_plan_items: withAuth_(list_plan_items),
   upsert_plan_item: withAuth_(upsert_plan_item),
   delete_plan_item: withAuth_(delete_plan_item),
-  duplicate_day_to_range: withAuth_(duplicate_day_to_range),
+  delete_plan_items_for_date: withAuth_(delete_plan_items_for_date),
+  duplicate_plan_items_to_range: withAuth_(duplicate_plan_items_to_range),
   list_library: withAuth_(list_library),
   upsert_library: withAuth_(upsert_library),
   delete_library: withAuth_(delete_library),
   list_tags: withAuth_(list_tags),
   upsert_tag: withAuth_(upsert_tag),
+  list_calendar_events: withAuth_(list_calendar_events),
   list_conflicts: withAuth_(list_conflicts),
-  request_photo_upload: withAuth_(request_photo_upload),
+  upload_photo: withAuth_(upload_photo),
+  run_photo_ocr: withAuth_(run_photo_ocr),
   list_photos: withAuth_(list_photos),
   reconcile_photo: withAuth_(reconcile_photo),
   get_settings: withAuth_(get_settings),
