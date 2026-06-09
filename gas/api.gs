@@ -316,12 +316,12 @@ const run_photo_ocr = (params) => {
     engine = 'regex (gemini failed: ' + err.message + ')';
   }
 
-  const ds = candidates.map((c) => c.date).filter(Boolean).sort();
+  // candidates are already date-sorted by both the regex and Gemini paths.
   const result = {
     month: parsed.month,
     year: parsed.year,
-    range_start: ds.length ? ds[0] : '',
-    range_end: ds.length ? ds[ds.length - 1] : '',
+    range_start: candidates.length ? candidates[0].date : '',
+    range_end: candidates.length ? candidates[candidates.length - 1].date : '',
     candidates: candidates,
     engine: engine,
     low_structure: parsed.low_structure || false,

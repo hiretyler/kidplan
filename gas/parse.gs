@@ -18,9 +18,16 @@ var PRINT_NOISE_WORDS_ = listToMap_([
 ]);
 var MONTH_NAMES_ = ['january', 'february', 'march', 'april', 'may', 'june',
   'july', 'august', 'september', 'october', 'november', 'december'];
-// A content word is kept only if its height is at least this fraction of the
-// printed day-number height. Handwriting clears it; small printed holidays don't.
-var HANDWRITING_MIN_RATIO_ = 0.7;
+// Geometry tuning knobs for the grid parser. These are the dials a future
+// accuracy pass would turn (see HANDOFF "PRIMITIVE" backlog before retuning).
+var HANDWRITING_MIN_RATIO_ = 0.7;       // keep words >= this * day-number height (drops printed holidays)
+var CELL_WIDTH_DEFAULT_PX_ = 80;        // fallback cell width when column centers are degenerate
+var Y_BAND_RATIO_ = 0.8;                // words within this * text-height share one line-band
+var GAP_SPLIT_RATIO_ = 0.55;            // any x-gap over this * cell-width always ends a line
+var CROSS_SPLIT_OUTLIER_MULT_ = 2.5;    // a column-crossing gap over this * the line's tightest gap...
+var CROSS_SPLIT_MIN_RATIO_ = 0.2;       // ...and over this * cell-width splits two adjacent-cell entries
+var ROW_FLOOR_TOL_RATIO_ = 0.5;         // writing within this * text-height above an anchor counts as that row
+var STRADDLE_PX_ = 18;                  // a word within this many px of a cell boundary -> "check date"
 
 // Entry point. words: [{t,x,y,w,h}] from extractVisionWords_. opts.month (1-based)
 // and opts.year override auto-detection. Returns
@@ -251,10 +258,10 @@ function groupLinesByDate_(gridWords, lattice, month, year, daysInMonth, firstDo
   const medH = median_(content.map((w) => w.h || 0)) || 12;
   const colDiffs = [];
   for (let i = 1; i < lattice.colCenter.length; i++) colDiffs.push(lattice.colCenter[i] - lattice.colCenter[i - 1]);
-  const cellWidth = median_(colDiffs) || 80;
+  const cellWidth = median_(colDiffs) || CELL_WIDTH_DEFAULT_PX_;
 
   const lines = groupWordsIntoLines_(content, medH, cellWidth, lattice.colBound);
-  const tol = medH * 0.5;
+  const tol = medH * ROW_FLOOR_TOL_RATIO_;
   const lowSet = {};
   lines.forEach((ln) => {
     ln.low = lineStraddles_(ln, lattice);
@@ -345,7 +352,7 @@ function groupWordsIntoLines_(content, medH, cellWidth, colBound) {
   const bands = [];
   let band = null;
   sorted.forEach((w) => {
-    if (band && Math.abs(w.y - band.y) <= medH * 0.8) {
+    if (band && Math.abs(w.y - band.y) <= medH * Y_BAND_RATIO_) {
       band.words.push(w);
       band.y = (band.y * (band.words.length - 1) + w.y) / band.words.length;
     } else {
@@ -364,8 +371,8 @@ function groupWordsIntoLines_(content, medH, cellWidth, colBound) {
     for (let i = 1; i < ws.length; i++) {
       const gap = ws[i].x - ws[i - 1].x;
       const crossCol = indexFromBounds_(ws[i].x, colBound) !== indexFromBounds_(ws[i - 1].x, colBound);
-      const bigAbs = gap > cellWidth * 0.55;
-      const crossOutlier = crossCol && gap > minGap * 2.5 && gap > cellWidth * 0.2;
+      const bigAbs = gap > cellWidth * GAP_SPLIT_RATIO_;
+      const crossOutlier = crossCol && gap > minGap * CROSS_SPLIT_OUTLIER_MULT_ && gap > cellWidth * CROSS_SPLIT_MIN_RATIO_;
       if (bigAbs || crossOutlier) {
         lines.push(makeLine_(seg));
         seg = [ws[i]];
@@ -392,7 +399,7 @@ function makeLine_(words) {
 // True when a line's words sit within a few px of a cell boundary, i.e. the cell
 // (and therefore the date) assignment is ambiguous -> surfaced as "check date".
 function lineStraddles_(line, lattice) {
-  const near = (val, bounds) => bounds.some((b) => Math.abs(val - b) < 18);
+  const near = (val, bounds) => bounds.some((b) => Math.abs(val - b) < STRADDLE_PX_);
   return line.words.some((w) => near(w.x, lattice.colBound) || near(w.y, lattice.rowBound));
 }
 
