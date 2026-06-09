@@ -115,6 +115,18 @@ Verify: open the app on the real current date. A day type / Plan A summary / Pla
 
 5 duplicate "[Shared] Rainy-day craft kit" test events were created on the wrong day during debugging, plus their `PlanItems` rows. Delete the duplicates via the x button on each activity, and delete the stray calendar events. Also check the `Days` tab for any duplicate rows with the same date (from the pre-fix key-match bug) and remove the stale ones.
 
+## Paper-calendar photo import: status = PRIMITIVE (paused 2026-06-09)
+
+The Wave 4a/4b photo->events pipeline works end to end (camera -> Drive -> Vision OCR -> grid reconstruction -> Gemini cleanup -> review pane -> calendar) but accuracy is **primitive and plateaued**. Dates and times for clearly-separated, time-stamped entries are mostly right; densely-packed or multi-line handwriting still mis-merges adjacent entries and mis-assigns the odd date (the review pane is the human safety net). Iterating on the geometry heuristics hit diminishing returns - several passes made little net progress or regressed. **Paused here deliberately** to prioritize getting the app usable on phones.
+
+Open question: **is Gemini earning its place?** Its cleanup (typo fixes, word-order, merge/split) has not clearly outperformed the regex assembler enough to justify the dependency. Re-evaluate before investing more; consider dropping it.
+
+When revisiting, investigate (in rough priority):
+- **Better use of Vision** - we currently use only word bounding boxes + a hand-rolled grid. Explore the full block/paragraph/`detectedBreak` hierarchy and `blockType` (see vault note refs in the Wave-4 research) before adding more heuristics.
+- **Detect the printed day-divider lines** of the calendar grid (image line/contour detection, e.g. OpenCV-style, or a Document AI table model) so cells come from the actual ruled boxes instead of inferred day-number anchors. This is the most promising fix for the cross-cell event merging.
+- **On-paper tactics** - cheap accuracy wins from how we write on the calendar: circle/box each event, consistent left-aligned start, one event per line. Worth testing whether a simple "circle it" convention beats any amount of parsing cleverness.
+- **Erased-pencil detection.** Faintly-erased handwriting still gets OCR'd and imported (e.g. "fundraise" on Jun 13 was erased on paper but read as a live event). Detect low-contrast/faint strokes (Vision word confidence or stroke darkness) and drop/flag them.
+
 ## Gotchas already learned (vault notes exist)
 
 - clasp v3 dropped `--type webapp` -> use `create-script --type standalone`; web-app config lives in `appsscript.json`. (`~/vault/Tools/clasp-create-script-setup-gotchas.md`)

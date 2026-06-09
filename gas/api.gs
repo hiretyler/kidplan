@@ -287,15 +287,52 @@ const upload_photo = (params) => {
   return { ok: true, data: saved };
 };
 
-// Run Cloud Vision OCR on the Photos row's Drive file, persist the raw text.
-// Phase 4b will add parsing + structured reconciliation on top of this.
+// Run Cloud Vision OCR on the Photos row's Drive file, reconstruct the calendar
+// grid into dated candidates, and persist both the raw text and parsed JSON.
+// Optional params.month (1-based) / params.year override the auto-detected label.
 const run_photo_ocr = (params) => {
   if (!params || !params.id) throw new Error('id is required');
   const row = getRowByKey_('Photos', 'id', params.id);
   if (!row) throw new Error('photo not found: ' + params.id);
   if (!row.drive_file_id) throw new Error('photo row has no drive_file_id');
-  const text = runVisionOcrOnDriveFile_(row.drive_file_id);
-  const updated = upsertRow_('Photos', 'id', { id: row.id, ocr_text: text });
+  const ocr = runVisionOcrOnDriveFile_(row.drive_file_id);
+  const parsed = parsePaperCalendar_(ocr.words, { month: params.month, year: params.year });
+
+  // Prefer the Gemini-cleaned events; fall back to the regex assembler if Gemini
+  // is unset / unreachable / over quota so the feature never hard-fails. Dates are
+  // ours either way - the LLM only structures the text within each date.
+  let candidates = parsed.candidates;
+  let engine = 'regex';
+  try {
+    const cleaned = structureWithGemini_(parsed.dateText || {}, parsed.month, parsed.year);
+    if (cleaned && cleaned.length) {
+      const lowSet = {};
+      (parsed.lowDates || []).forEach((d) => { lowSet[d] = true; });
+      cleaned.forEach((e) => { if (lowSet[e.date]) e.confidence = 'low'; });
+      candidates = cleaned;
+      engine = 'gemini';
+    }
+  } catch (err) {
+    engine = 'regex (gemini failed: ' + err.message + ')';
+  }
+
+  const ds = candidates.map((c) => c.date).filter(Boolean).sort();
+  const result = {
+    month: parsed.month,
+    year: parsed.year,
+    range_start: ds.length ? ds[0] : '',
+    range_end: ds.length ? ds[ds.length - 1] : '',
+    candidates: candidates,
+    engine: engine,
+    low_structure: parsed.low_structure || false,
+  };
+  const updated = upsertRow_('Photos', 'id', {
+    id: row.id,
+    ocr_text: ocr.text,
+    parsed_json: JSON.stringify(result),
+    covers_date_range_start: result.range_start,
+    covers_date_range_end: result.range_end,
+  });
   return { ok: true, data: updated };
 };
 
@@ -304,9 +341,40 @@ const list_photos = (_params) => ({
   data: getRows_('Photos').sort((a, b) => String(b.uploaded_at || '').localeCompare(String(a.uploaded_at || ''))),
 });
 
-// Phase 4b will own this: convert ocr_text into PlanItem candidates and let
-// the user accept/edit/reject each one.
-const reconcile_photo = (_params) => { throw new Error('Not implemented until Phase 4b'); };
+// Upsert the user-accepted (and possibly edited) candidates from a reviewed
+// photo as PlanItems with source='ocr', then flag the Photos row reconciled.
+// Each accepted candidate must carry a date, title, and start_time (the review
+// UI enforces this); calendar sync warnings are collected, not thrown.
+const reconcile_photo = (params) => {
+  if (!params || !params.id) throw new Error('id is required');
+  const accepted = params.accepted;
+  if (!Array.isArray(accepted) || !accepted.length) throw new Error('accepted candidates are required');
+  const row = getRowByKey_('Photos', 'id', params.id);
+  if (!row) throw new Error('photo not found: ' + params.id);
+
+  const warnings = [];
+  let created = 0;
+  accepted.forEach((c, i) => {
+    if (!c || !c.date || !c.title) throw new Error('candidate ' + (i + 1) + ' needs a date and title');
+    if (!c.start_time) throw new Error('candidate "' + c.title + '" needs a start time');
+    const res = upsert_plan_item({
+      date: c.date,
+      title: c.title,
+      start_time: c.start_time,
+      end_time: c.end_time || '',
+      kid: c.kid || 'shared',
+      location: c.location || '',
+      tag: c.tag || '',
+      description: c.description || '',
+      source: 'ocr',
+    });
+    created++;
+    if (res.calendar_warning) warnings.push(res.calendar_warning);
+  });
+
+  const updated = upsertRow_('Photos', 'id', { id: row.id, reconciled: true });
+  return { ok: true, data: { created: created, photo: updated }, calendar_warnings: warnings };
+};
 
 // Keys the API is allowed to read/write. Secrets are never exposed.
 const EDITABLE_SETTING_KEYS_ = ['family_calendar_id', 'read_only_calendar_ids', 'photo_drive_folder_id'];
