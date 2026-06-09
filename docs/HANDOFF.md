@@ -1,6 +1,6 @@
 # KidPlan - session handoff / status
 
-Last updated: 2026-05-29 (Wave 3.5 LIVE @8; Wave 4a code pushed, OAuth scope consented, awaiting deploy + script property + first photo test). Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
+Last updated: 2026-06-09 (Wave 4a + 4b LIVE @18; photo->events pipeline works end to end but accuracy is PRIMITIVE and paused - see backlog; next up = host the frontend so the app is usable on phones, then Wave 5 phone verify). Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
 
 ## What this is
 
@@ -19,10 +19,11 @@ Phone-first web app for Tyler + wife Soleil to plan their two kids' summer days.
 - GAS Script ID: `1FYSj3sQ-ddQgacjWmPnicZ297ufV-Q3aNi4DFSzstkLgZe6LjDnREoFb`
 - Editor: `https://script.google.com/d/1FYSj3sQ-ddQgacjWmPnicZ297ufV-Q3aNi4DFSzstkLgZe6LjDnREoFb/edit`
 - Deployment ID (stable - always redeploy with `-i` this): `AKfycbxJ7oc6WazWnkr0YLrE9S-2c4w04Xz6K4bRgx276EkJPYJN3Z48lnO56QeF9Hlm02ye`
-- `/exec` URL: `https://script.google.com/macros/s/<deploymentId>/exec` (currently @8 - Wave 3.5 live; Wave 4a pushed but not yet deployed).
+- `/exec` URL: `https://script.google.com/macros/s/<deploymentId>/exec` (currently @18 - Wave 4a + 4b live).
 - Family calendar ID (script prop `FAMILY_CALENDAR_ID`): `3716c55ac1e5c3159e66479cf85951e662bacb12f4ed00da0cf2d0db86a2cff3@group.calendar.google.com`
-- Script Properties set: `API_TOKEN`, `SHEET_ID`, `FAMILY_CALENDAR_ID`. Optional/unset: `READ_ONLY_CALENDAR_IDS`, `FRONTEND_URL`. **Needs setting before Wave 4a test:** `PHOTO_DRIVE_FOLDER_ID = 1F1Nfq8_K_zyf0dU_ZfYg_iehcBQLAfXi`. Secrets live ONLY in Script Properties.
-- GCP project: standard Cloud project `kidplan` (project number `444981393891`), Vision API enabled, OAuth consent in Testing mode with soleilandtyler@gmail.com as the only Test user. Apps Script project linked to this GCP project; deployer has consented to the `cloud-vision` scope (verified 2026-05-28).
+- Script Properties set: `API_TOKEN`, `SHEET_ID`, `FAMILY_CALENDAR_ID`, `PHOTO_DRIVE_FOLDER_ID` (= `1F1Nfq8_K_zyf0dU_ZfYg_iehcBQLAfXi`), `GEMINI_API_KEY`. Optional/unset: `READ_ONLY_CALENDAR_IDS`, `FRONTEND_URL`, `GEMINI_MODEL` (defaults to `gemini-2.5-flash`). Secrets live ONLY in Script Properties.
+- GCP project: standard Cloud project `kidplan` (project number `444981393891`), **Vision API + Drive API enabled, billing attached** (Vision needs billing; first 1000 OCR/mo free). OAuth consent in Testing mode with soleilandtyler@gmail.com as the only Test user. Apps Script linked to this GCP project; deployer consented to the `cloud-vision` + full `drive` scopes (DriveApp.createFile into a pre-made folder needs full `drive`).
+- Gemini key: created in a **separate, no-billing project** (a key in the billing-enabled `kidplan` project gets treated as paid/prepay and 429s "prepayment credits depleted"). Free tier ~1500 req/day.
 
 ## Deploy / dev workflow
 
@@ -42,27 +43,19 @@ Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanife
 - Wave 3.1 (harden plan-item save, merge chill->indoor, fallback per tag): DONE + migrations run on live sheet.
 - Wave 3.2 (palette C, two-section Library, unified tags): DONE.
 - Wave 3.3 (library-first activity picker: instant-add, inline lane/time, "+ New activity" saves to library, Plan B from picker): DONE.
-- Wave 3.5 (re-alignment - per-activity backups, calendar conflict awareness, schema collapse): LIVE on @8 since 2026-05-28; migration ran on live sheet; two follow-on bugs caught and fixed (time-column auto-coercion + temp-id race on Add backup).
+- Wave 3.5 (re-alignment - per-activity backups, calendar conflict awareness, schema collapse): LIVE; migration ran on live sheet.
 - PWA icons (coral "K") generated; manifest aligned to palette C.
-- Wave 4a (capture + OCR plumbing, raw text view): code PUSHED 2026-05-28; OAuth `cloud-vision` scope CONSENTED by deployer; **not yet deployed**, **`PHOTO_DRIVE_FOLDER_ID` script property not yet set**, and no live test of the camera button yet.
-- Wave 4b (parse OCR text into PlanItem candidates + human-review acceptance UI): NOT STARTED. Depends on first looking at real Wave 4a OCR output to see how readable Vision finds the paper-calendar handwriting.
-- Wave 5 (end-to-end verify on both phones + `simplify` pass): NOT STARTED.
+- Wave 4a (capture + OCR plumbing, raw text view): DONE + LIVE. Camera -> Drive -> Vision OCR verified end to end.
+- Wave 4b (parse OCR into PlanItem candidates + review/accept UI): DONE + LIVE (@18), but accuracy is **PRIMITIVE and paused** - see the "PRIMITIVE" backlog section below. Pipeline = Vision word boxes -> grid reconstruction (`gas/parse.gs`) -> Gemini Flash cleanup (`gas/gemini.gs`, regex fallback) -> review pane -> `reconcile_photo` upserts accepted events as `source='ocr'`. NOTE: the live "Add events" -> calendar write path has NOT yet been exercised by a real reconcile (do this as part of Wave 5).
+- Wave 5 (end-to-end verify on both phones + `simplify` pass): simplify pass DONE; phone verify PENDING (blocked on hosting the frontend).
 
-## RIGHT NOW - pick up here after restart (2026-05-29)
+## RIGHT NOW - pick up here (2026-06-09)
 
-Stopped mid-Wave-4a so the laptop could restart. Code is on disk and pushed to the Apps Script project; not yet deployed; never tested live.
+Photo parsing is paused (primitive - see backlog). Priority pivoted to **making the app usable on phones**. Remaining to wrap the plan:
 
-Three steps to resume, in order:
-
-1. **Set the photo-folder script property.** In the editor (https://script.google.com/d/1FYSj3sQ-ddQgacjWmPnicZ297ufV-Q3aNi4DFSzstkLgZe6LjDnREoFb/edit) → gear → Project Settings → Script properties → Add script property:
-   - Key: `PHOTO_DRIVE_FOLDER_ID`
-   - Value: `1F1Nfq8_K_zyf0dU_ZfYg_iehcBQLAfXi`
-2. **Deploy.** `cd gas && sh deploy.sh` (or the longer `clasp_config_auth=... clasp deploy -i <STABLE_ID>` form). This bumps the `/exec` from @8 to @9.
-3. **Test the camera button.** Hard-refresh the local `web/index.html`, tap the small camera icon in the Today header. The flow should be: file picker → "Uploading…" modal → "Running OCR…" modal → a modal showing the raw text Vision pulled out of the image. The Drive folder should also have a new file in it.
-
-If OCR text looks usable, that unlocks Wave 4b (parser + structured review UI - takes the raw text and produces PlanItem candidates the user accepts/edits/rejects). If Vision struggles with the handwriting, we know that *now* and can decide whether to add language hints, image preprocessing, or just lean on the raw text as a copy source.
-
-Auth state: the cloud-vision OAuth scope was added to `appsscript.json`, the new scope set was consented to interactively by running an editor function as soleilandtyler@gmail.com (the only Test user on the Testing-mode consent screen for the linked GCP project `kidplan` / `444981393891`). No further reauth should be needed until the scope set changes again.
+1. **Host the frontend** (this is what unlocks phone use). Upload the 4 files in `web/` (`index.html`, `manifest.webmanifest`, `icon-512.png`, `icon-192.png`) to an HTTPS path (planned `tgeddes.com/kidplan/`). `API_URL` (the stable `/exec`) is already baked into `index.html`, so no code change - just upload. First load on each phone asks once for the `API_TOKEN`, then stores it in localStorage.
+2. **Wave 5 phone verify.** On both phones: load the hosted URL, enter the token, run the core flow (add activity from library -> appears on Today + family Google Calendar; week view; backups). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
+3. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 commits - push when ready.
 
 ## Wave 3.5 - shipped LIVE on @8 (2026-05-28)
 
