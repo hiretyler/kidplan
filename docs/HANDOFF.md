@@ -35,7 +35,7 @@ clasp-soleil deploy -i AKfycbxJ7oc6WazWnkr0YLrE9S-2c4w04Xz6K4bRgx276EkJPYJN3Z48l
 ```
 Editor-run setup/migration functions (no trailing underscore so they show in the Run dropdown), open the file in the editor and pick from the function dropbox: `setupSeedSheet`, `migrateDateColumnsToText`, `migrateToBackupsModelV2`. (The old `migrateMergeChillIntoIndoor` and `ensureLibraryFallbackPerTag` were deleted in Wave 3.5.) clasp can run push/deploy from a non-interactive shell with `clasp_config_auth=~/.clasp-accounts/soleilandtyler.json clasp ...`; editor functions cannot be triggered from the CLI.
 
-Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanifest`, `icon-512.png`, `icon-192.png`) to `tgeddes.com/kidplan/` over HTTPS. `API_URL` is baked into `index.html`. NOT yet hosted.
+Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanifest`, `icon-512.png`, `icon-192.png`) to `tgeddes.dev/kidplan/` over HTTPS. `API_URL` is baked into `index.html`. NOT yet hosted.
 
 ## Wave status
 
@@ -53,7 +53,7 @@ Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanife
 
 Photo parsing is paused (primitive - see backlog). Priority pivoted to **making the app usable on phones**. Remaining to wrap the plan:
 
-1. **Host the frontend** (this is what unlocks phone use). Upload the 4 files in `web/` (`index.html`, `manifest.webmanifest`, `icon-512.png`, `icon-192.png`) to an HTTPS path (planned `tgeddes.com/kidplan/`). `API_URL` (the stable `/exec`) is already baked into `index.html`, so no code change - just upload. First load on each phone asks once for the `API_TOKEN`, then stores it in localStorage.
+1. **Host the frontend** (this is what unlocks phone use). Upload the 4 files in `web/` (`index.html`, `manifest.webmanifest`, `icon-512.png`, `icon-192.png`) to an HTTPS path (planned `tgeddes.dev/kidplan/`). `API_URL` (the stable `/exec`) is already baked into `index.html`, so no code change - just upload. First load on each phone asks once for the `API_TOKEN`, then stores it in localStorage.
 2. **Wave 5 phone verify.** On both phones: load the hosted URL, enter the token, run the core flow (add activity from library -> appears on Today + family Google Calendar; week view; backups). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
 3. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 commits - push when ready.
 
