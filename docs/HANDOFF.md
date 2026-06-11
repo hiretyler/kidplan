@@ -1,6 +1,6 @@
 # KidPlan - session handoff / status
 
-Last updated: 2026-06-10 (v0.6 nap feature LIVE: GAS @20 + frontend rsynced, but the `migrateAddItemTypeColumn` editor run is PENDING - naps will not store their type until it runs. Earlier today: upsertRow_ column-wipe bug fixed @19, cleanup ran, frontend hosting moved to rsync. See RIGHT NOW.) Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
+Last updated: 2026-06-11 (v0.7 LIVE: GAS @21 + frontend rsynced. Naps verified working on phones (migration ran). v0.7 = centered bottom nav (4-col grid fix), "Clear this day's schedule" button, nap_two GCal color PALE_BLUE->CYAN, and `cleanupCalendarOrphans` upgraded to a two-way reconcile - run it once to recreate Tyler's missing 11-2 one-nap event + recolor existing naps. See RIGHT NOW.) Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
 
 ## What this is
 
@@ -59,9 +59,11 @@ Frontend is HOSTED at `tgeddes.dev/kidplan/`, both phones logged in. First real 
 
 Done since: frontend re-uploaded via rsync (new build verified live), `cleanupCalendarOrphans` ran clean (kept=9 relinked=4 orphans=0 dupes_deleted=7 - the June 11 mess is resolved). Then the **v0.6 nap feature** shipped (GAS @20 + frontend): naps via "+ Add nap" sheet (one-nap 11:00a/3hr vs two-nap 9:00a+2:00p/90min, Settings `nap_mode` pre-selects), eldest plans (elder kid's library activity paired under a nap, [Elder] GCal event), nap colors (BLUE/PALE_BLUE on GCal, matching app accents), `item_type` column, Settings About shows APP_VERSION (bump on every frontend deploy!), `.htaccess` makes index.html no-cache.
 
+v0.6 follow-ups shipped as v0.7 (2026-06-11, GAS @21): naps tested live; Tyler's one-nap 11-2 calendar event never wrote (transient, surfaced only as a dismissible calendar_warning) -> `cleanupCalendarOrphans` is now a two-way reconcile whose phase 2 pushes every row back to the calendar (recreates missing events, refreshes title/time/color). Also: bottom nav 5->4 column fix, Clear-day button (wires `delete_plan_items_for_date`), nap_two color CYAN.
+
 Remaining:
 
-1. **Run `migrateAddItemTypeColumn`** from the GAS editor (`sheets.gs`, Run dropdown) - until it runs, the live sheet has no `item_type` column and a saved nap silently loses its type (renders/colors as a plain activity).
+1. **Run `cleanupCalendarOrphans`** once from the GAS editor - recreates the missing 11-2 nap event and recolors the existing nap events to the new CYAN/BLUE scheme. (`migrateAddItemTypeColumn` already ran on 2026-06-11.)
 2. **Triage 4 PlanItems rows with blank `start_time`** (`a17cba080d27`, `de6ac44db898`, `132b781836ad`, `6ee6f512a22b` - likely pre-3.5 test rows). Run `listPlanItemsMissingStartTime` (editor, `sheets.gs`) to see date/title/source. Real activity -> set its time in the app; junk -> delete the row from the PlanItems tab, then re-run `cleanupCalendarOrphans` to sweep its (now relinked) calendar event as an orphan.
 3. **Wave 5 phone verify.** On both phones: run the core flow (add activity from library -> appears on Today + family Google Calendar; edit time -> SAME event moves; delete -> event disappears; week view; backups; add nap -> eldest plan). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
 4. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix + v0.6 commits - push when ready.
