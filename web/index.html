@@ -1224,7 +1224,7 @@
     // Add minutes to an HH:mm string, clamped to 23:59 (same calendar day).
     // Bump on every frontend deploy so Settings > About shows whether a phone
     // has the latest build loaded (v0.5 = the pre-nap-feature live build).
-    const APP_VERSION = 'v0.7';
+    const APP_VERSION = 'v0.8';
 
     // Nap insertion presets. Two-nap days: 9:00a + 2:00p at 90 min for
     // planning. One-nap days: 11:00a at 3 hrs. All editable inline after add.
@@ -2116,7 +2116,6 @@
             <div class="picker-row">
               <div class="name ${tagClass(l.tag)}"><span class="swatch"></span>${escapeHtml(l.name)}</div>
               <div class="meta">
-                ${asBool(l.indoor) ? ICONS.indoor : ICONS.outdoor}
                 ${!isNaN(dur) ? `<span>${dur} min</span>` : ''}
                 <span class="age-pill">${escapeHtml(ageLabel(l.kid_age_fit))}</span>
               </div>
@@ -2391,9 +2390,6 @@
             <div style="flex:1;"><label style="${lbl}">Duration (min)</label><input id="lib_dur" type="number" style="${inp}" value="${escapeHtml(it.typical_duration_min || '')}"></div>
             <div style="flex:1;"><label style="${lbl}">Age fit</label><select id="lib_age" style="${inp}">${['any','young','older','both'].map(a => `<option value="${a}" ${it.kid_age_fit === a ? 'selected' : ''}>${tagLabel(a)}</option>`).join('')}</select></div>
           </div>
-          <label style="display:flex; align-items:center; gap:10px; ${fld} font-size:14px;">
-            <input type="checkbox" id="lib_indoor" ${asBool(it.indoor) ? 'checked' : ''} style="width:18px;height:18px;"> Indoor
-          </label>
           <div style="${fld}"><label style="${lbl}">Notes</label><textarea id="lib_notes" rows="2" style="${inp}">${escapeHtml(it.notes || '')}</textarea></div>
           <button class="btn-primary" onclick="app.saveLibrary()">${addToDay ? 'Save and add to day' : 'Save'}</button>
           ${it.id ? `<button class="btn-secondary" style="margin-top:10px; color:var(--warn);" onclick="app.deleteLibrary('${escapeHtml(it.id)}')">Delete</button>` : ''}
@@ -2410,7 +2406,8 @@
           description: document.getElementById('lib_desc').value,
           typical_duration_min: document.getElementById('lib_dur').value,
           kid_age_fit: document.getElementById('lib_age').value,
-          indoor: document.getElementById('lib_indoor').checked ? 'TRUE' : 'FALSE',
+          // indoor checkbox removed (v0.8) - the tag carries indoor/outdoor
+          // meaning; omitting the key preserves stored values via the merge.
           notes: document.getElementById('lib_notes').value
         };
         if (it.id) params.id = it.id;
@@ -2747,7 +2744,6 @@
                   ${escapeHtml(it.name)}
                 </div>
                 <div class="meta">
-                  ${asBool(it.indoor) ? ICONS.indoor : ICONS.outdoor}
                   ${!isNaN(dur) ? `<span style="font-size:12px;color:var(--ink-soft);">${dur} min</span>` : ''}
                   <span class="age-pill">${escapeHtml(ageLabel(it.kid_age_fit))}</span>
                 </div>
