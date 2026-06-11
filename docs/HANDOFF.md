@@ -35,7 +35,11 @@ clasp-soleil deploy -i AKfycbxJ7oc6WazWnkr0YLrE9S-2c4w04Xz6K4bRgx276EkJPYJN3Z48l
 ```
 Editor-run setup/migration functions (no trailing underscore so they show in the Run dropdown), open the file in the editor and pick from the function dropbox: `setupSeedSheet`, `migrateDateColumnsToText`, `migrateToBackupsModelV2`. (The old `migrateMergeChillIntoIndoor` and `ensureLibraryFallbackPerTag` were deleted in Wave 3.5.) clasp can run push/deploy from a non-interactive shell with `clasp_config_auth=~/.clasp-accounts/soleilandtyler.json clasp ...`; editor functions cannot be triggered from the CLI.
 
-Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanifest`, `icon-512.png`, `icon-192.png`) to `tgeddes.dev/kidplan/` over HTTPS. `API_URL` is baked into `index.html`. NOT yet hosted.
+Frontend deploy (LIVE at `https://tgeddes.dev/kidplan/`): rsync `web/` to the Namecheap docroot (same key/port as the tgeddes.dev site - full runbook in `~/projects/tgeddes.dev/DEPLOY.md`):
+```
+rsync -avz -e "ssh -i $HOME/.ssh/tgeddes_dev -p 21098" web/ tgedlpaf@tgeddes.dev:/home/tgedlpaf/public_html/tgeddes.dev/kidplan/
+```
+`API_URL` is baked into `index.html`. The portfolio's `deploy.sh` excludes `kidplan/` so its `rsync --delete` never clobbers the app.
 
 ## Wave status
 
@@ -53,12 +57,13 @@ Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanife
 
 Frontend is HOSTED at `tgeddes.dev/kidplan/`, both phones logged in. First real use by Soleil (2026-06-10) hit the **upsertRow_ column-wipe bug**: `upsertRow_` wrote the full row width so any column missing from a patch was blanked - the client never sends `gcal_event_id`, so every inline edit wiped it, every save took the calendar CREATE path (one orphan GCal event per edit), and deletes could not find their event. Fixed and deployed @19 (commit `5f58b42`): `upsertRow_` now merges over the existing row; `writePlanItemToCalendar_` adopts an event tagged `KidPlan item <id>` before creating; `deletePlanItemFromCalendar_` sweeps id-tagged strays; client mints real PlanItem ids (`genId()`, `_saving` flag replaces `temp_` ids), keeps in-flight rows across refetches, and patches state locally instead of `loadView()` reload storms.
 
+Done since: frontend re-uploaded via rsync (new build verified live), `cleanupCalendarOrphans` ran clean (kept=9 relinked=4 orphans=0 dupes_deleted=7 - the June 11 mess is resolved).
+
 Remaining:
 
-1. **Re-upload `web/index.html` to `tgeddes.dev/kidplan/`** - the deployed @19 backend already stops duplicate events, but the hosted frontend still has the reload storms, stuck "Saving..." rows, and re-add-duplicate path until re-uploaded.
-2. **Run `cleanupCalendarOrphans` once** from the GAS editor (Run dropdown, `calendar.gs`). Re-links rows whose `gcal_event_id` was wiped, deletes orphaned/duplicate `KidPlan item`-tagged events across 2026 (the June 11 mess), never touches external events. Logs a kept/relinked/orphans/dupes summary. This also covers the old pre-3.5 test-event cleanup debt.
-3. **Wave 5 phone verify.** On both phones: run the core flow (add activity from library -> appears on Today + family Google Calendar; edit time -> SAME event moves; delete -> event disappears; week view; backups). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
-4. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix commits - push when ready.
+1. **Triage 4 PlanItems rows with blank `start_time`** (`a17cba080d27`, `de6ac44db898`, `132b781836ad`, `6ee6f512a22b` - likely pre-3.5 test rows). Run `listPlanItemsMissingStartTime` (editor, `sheets.gs`) to see date/title/source. Real activity -> set its time in the app; junk -> delete the row from the PlanItems tab, then re-run `cleanupCalendarOrphans` to sweep its (now relinked) calendar event as an orphan.
+2. **Wave 5 phone verify.** On both phones: run the core flow (add activity from library -> appears on Today + family Google Calendar; edit time -> SAME event moves; delete -> event disappears; week view; backups). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
+3. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix commits - push when ready.
 
 ## Wave 3.5 - shipped LIVE on @8 (2026-05-28)
 
