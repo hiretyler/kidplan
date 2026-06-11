@@ -69,11 +69,19 @@ function writePlanItemToCalendar_(item) {
     ? item.end_time
     : addMinutesToTime_(item.start_time, 60);
 
-  // Update path: fetch existing event and mutate in place. If the row lost its
-  // event id (or never saved it), adopt an event already tagged with this
-  // item's id rather than minting a duplicate.
-  let existing = item.gcal_event_id ? cal.getEventById(item.gcal_event_id) : null;
-  if (!existing) existing = findEventsByItemId_(cal, item.date, item.id)[0] || null;
+  // Update path: mutate the existing event in place. getEventById is NOT used
+  // to resolve it: it returns trashed/cancelled events, which accept mutations
+  // silently but never reappear on the grid (a row pointing at one looked
+  // synced while its event stayed invisible). Only trust an event the day
+  // sweep can actually see - getEvents skips trashed events. The sweep also
+  // recovers rows that lost their event id (adopt instead of duplicating).
+  // PlanItem dates never change in-app, so the same-day sweep always covers.
+  const dayMatches = findEventsByItemId_(cal, item.date, item.id);
+  let existing = null;
+  if (item.gcal_event_id) {
+    existing = dayMatches.filter((ev) => ev.getId() === item.gcal_event_id)[0] || null;
+  }
+  if (!existing) existing = dayMatches[0] || null;
   if (existing) {
     existing.setTitle(title);
     existing.setDescription(description);
@@ -157,8 +165,12 @@ function deletePlanItemFromCalendar_(item) {
   if (item.gcal_event_id) {
     const existing = cal.getEventById(item.gcal_event_id);
     if (existing) {
-      existing.deleteEvent();
-      deleted = true;
+      try {
+        existing.deleteEvent();
+        deleted = true;
+      } catch (e) {
+        // getEventById can return an already-trashed event; deleting it throws.
+      }
     }
   }
   findEventsByItemId_(cal, item.date, item.id).forEach((ev) => {
