@@ -1,6 +1,6 @@
 # KidPlan - session handoff / status
 
-Last updated: 2026-06-09 (Wave 4a + 4b LIVE @18; photo->events pipeline works end to end but accuracy is PRIMITIVE and paused - see backlog; next up = host the frontend so the app is usable on phones, then Wave 5 phone verify). Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
+Last updated: 2026-06-10 (frontend HOSTED at tgeddes.dev/kidplan, both phones logged in; first real two-person use surfaced the upsertRow_ column-wipe bug -> duplicate GCal events + broken deletes; fixed and LIVE @19, but the frontend re-upload + one-time `cleanupCalendarOrphans` editor run are still PENDING - see RIGHT NOW). Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
 
 ## What this is
 
@@ -49,13 +49,16 @@ Frontend deploy: upload the 4 files in `web/` (`index.html`, `manifest.webmanife
 - Wave 4b (parse OCR into PlanItem candidates + review/accept UI): DONE + LIVE (@18), but accuracy is **PRIMITIVE and paused** - see the "PRIMITIVE" backlog section below. Pipeline = Vision word boxes -> grid reconstruction (`gas/parse.gs`) -> Gemini Flash cleanup (`gas/gemini.gs`, regex fallback) -> review pane -> `reconcile_photo` upserts accepted events as `source='ocr'`. NOTE: the live "Add events" -> calendar write path has NOT yet been exercised by a real reconcile (do this as part of Wave 5).
 - Wave 5 (end-to-end verify on both phones + `simplify` pass): simplify pass DONE; phone verify PENDING (blocked on hosting the frontend).
 
-## RIGHT NOW - pick up here (2026-06-09)
+## RIGHT NOW - pick up here (2026-06-10)
 
-Photo parsing is paused (primitive - see backlog). Priority pivoted to **making the app usable on phones**. Remaining to wrap the plan:
+Frontend is HOSTED at `tgeddes.dev/kidplan/`, both phones logged in. First real use by Soleil (2026-06-10) hit the **upsertRow_ column-wipe bug**: `upsertRow_` wrote the full row width so any column missing from a patch was blanked - the client never sends `gcal_event_id`, so every inline edit wiped it, every save took the calendar CREATE path (one orphan GCal event per edit), and deletes could not find their event. Fixed and deployed @19 (commit `5f58b42`): `upsertRow_` now merges over the existing row; `writePlanItemToCalendar_` adopts an event tagged `KidPlan item <id>` before creating; `deletePlanItemFromCalendar_` sweeps id-tagged strays; client mints real PlanItem ids (`genId()`, `_saving` flag replaces `temp_` ids), keeps in-flight rows across refetches, and patches state locally instead of `loadView()` reload storms.
 
-1. **Host the frontend** (this is what unlocks phone use). Upload the 4 files in `web/` (`index.html`, `manifest.webmanifest`, `icon-512.png`, `icon-192.png`) to an HTTPS path (planned `tgeddes.dev/kidplan/`). `API_URL` (the stable `/exec`) is already baked into `index.html`, so no code change - just upload. First load on each phone asks once for the `API_TOKEN`, then stores it in localStorage.
-2. **Wave 5 phone verify.** On both phones: load the hosted URL, enter the token, run the core flow (add activity from library -> appears on Today + family Google Calendar; week view; backups). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
-3. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 commits - push when ready.
+Remaining:
+
+1. **Re-upload `web/index.html` to `tgeddes.dev/kidplan/`** - the deployed @19 backend already stops duplicate events, but the hosted frontend still has the reload storms, stuck "Saving..." rows, and re-add-duplicate path until re-uploaded.
+2. **Run `cleanupCalendarOrphans` once** from the GAS editor (Run dropdown, `calendar.gs`). Re-links rows whose `gcal_event_id` was wiped, deletes orphaned/duplicate `KidPlan item`-tagged events across 2026 (the June 11 mess), never touches external events. Logs a kept/relinked/orphans/dupes summary. This also covers the old pre-3.5 test-event cleanup debt.
+3. **Wave 5 phone verify.** On both phones: run the core flow (add activity from library -> appears on Today + family Google Calendar; edit time -> SAME event moves; delete -> event disappears; week view; backups). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
+4. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix commits - push when ready.
 
 ## Wave 3.5 - shipped LIVE on @8 (2026-05-28)
 
