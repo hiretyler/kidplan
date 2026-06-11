@@ -1,6 +1,6 @@
 # KidPlan - session handoff / status
 
-Last updated: 2026-06-10 (frontend HOSTED at tgeddes.dev/kidplan, both phones logged in; first real two-person use surfaced the upsertRow_ column-wipe bug -> duplicate GCal events + broken deletes; fixed and LIVE @19, but the frontend re-upload + one-time `cleanupCalendarOrphans` editor run are still PENDING - see RIGHT NOW). Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
+Last updated: 2026-06-10 (v0.6 nap feature LIVE: GAS @20 + frontend rsynced, but the `migrateAddItemTypeColumn` editor run is PENDING - naps will not store their type until it runs. Earlier today: upsertRow_ column-wipe bug fixed @19, cleanup ran, frontend hosting moved to rsync. See RIGHT NOW.) Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
 
 ## What this is
 
@@ -57,13 +57,14 @@ rsync -avz -e "ssh -i $HOME/.ssh/tgeddes_dev -p 21098" web/ tgedlpaf@tgeddes.dev
 
 Frontend is HOSTED at `tgeddes.dev/kidplan/`, both phones logged in. First real use by Soleil (2026-06-10) hit the **upsertRow_ column-wipe bug**: `upsertRow_` wrote the full row width so any column missing from a patch was blanked - the client never sends `gcal_event_id`, so every inline edit wiped it, every save took the calendar CREATE path (one orphan GCal event per edit), and deletes could not find their event. Fixed and deployed @19 (commit `5f58b42`): `upsertRow_` now merges over the existing row; `writePlanItemToCalendar_` adopts an event tagged `KidPlan item <id>` before creating; `deletePlanItemFromCalendar_` sweeps id-tagged strays; client mints real PlanItem ids (`genId()`, `_saving` flag replaces `temp_` ids), keeps in-flight rows across refetches, and patches state locally instead of `loadView()` reload storms.
 
-Done since: frontend re-uploaded via rsync (new build verified live), `cleanupCalendarOrphans` ran clean (kept=9 relinked=4 orphans=0 dupes_deleted=7 - the June 11 mess is resolved).
+Done since: frontend re-uploaded via rsync (new build verified live), `cleanupCalendarOrphans` ran clean (kept=9 relinked=4 orphans=0 dupes_deleted=7 - the June 11 mess is resolved). Then the **v0.6 nap feature** shipped (GAS @20 + frontend): naps via "+ Add nap" sheet (one-nap 11:00a/3hr vs two-nap 9:00a+2:00p/90min, Settings `nap_mode` pre-selects), eldest plans (elder kid's library activity paired under a nap, [Elder] GCal event), nap colors (BLUE/PALE_BLUE on GCal, matching app accents), `item_type` column, Settings About shows APP_VERSION (bump on every frontend deploy!), `.htaccess` makes index.html no-cache.
 
 Remaining:
 
-1. **Triage 4 PlanItems rows with blank `start_time`** (`a17cba080d27`, `de6ac44db898`, `132b781836ad`, `6ee6f512a22b` - likely pre-3.5 test rows). Run `listPlanItemsMissingStartTime` (editor, `sheets.gs`) to see date/title/source. Real activity -> set its time in the app; junk -> delete the row from the PlanItems tab, then re-run `cleanupCalendarOrphans` to sweep its (now relinked) calendar event as an orphan.
-2. **Wave 5 phone verify.** On both phones: run the core flow (add activity from library -> appears on Today + family Google Calendar; edit time -> SAME event moves; delete -> event disappears; week view; backups). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
-3. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix commits - push when ready.
+1. **Run `migrateAddItemTypeColumn`** from the GAS editor (`sheets.gs`, Run dropdown) - until it runs, the live sheet has no `item_type` column and a saved nap silently loses its type (renders/colors as a plain activity).
+2. **Triage 4 PlanItems rows with blank `start_time`** (`a17cba080d27`, `de6ac44db898`, `132b781836ad`, `6ee6f512a22b` - likely pre-3.5 test rows). Run `listPlanItemsMissingStartTime` (editor, `sheets.gs`) to see date/title/source. Real activity -> set its time in the app; junk -> delete the row from the PlanItems tab, then re-run `cleanupCalendarOrphans` to sweep its (now relinked) calendar event as an orphan.
+3. **Wave 5 phone verify.** On both phones: run the core flow (add activity from library -> appears on Today + family Google Calendar; edit time -> SAME event moves; delete -> event disappears; week view; backups; add nap -> eldest plan). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
+4. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix + v0.6 commits - push when ready.
 
 ## Wave 3.5 - shipped LIVE on @8 (2026-05-28)
 
