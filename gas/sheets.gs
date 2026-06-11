@@ -224,6 +224,23 @@ function deleteRow_(tabName, keyColumn, keyValue) {
   }
 }
 
+// Editor-run inspector (log only, changes nothing). Lists PlanItems rows with a
+// blank start_time - cleanupCalendarOrphans can relink but not re-sync these.
+// Decide per row: real activity -> set its time in the app; junk/test row ->
+// delete it from the PlanItems tab, then re-run cleanupCalendarOrphans so its
+// calendar event is swept as an orphan.
+function listPlanItemsMissingStartTime() {
+  const broken = getRows_('PlanItems').filter((r) => !r.start_time || String(r.start_time).trim() === '');
+  if (!broken.length) {
+    Logger.log('no PlanItems rows with blank start_time');
+    return;
+  }
+  broken.forEach((r) => {
+    Logger.log('id=%s date=%s title="%s" kid=%s source=%s is_backup=%s gcal_event_id=%s updated_at=%s',
+      r.id, r.date, r.title, r.kid, r.source, r.is_backup, r.gcal_event_id, r.updated_at);
+  });
+}
+
 // Idempotent setup. Tyler runs once from the editor. Ensures all 6 tabs exist
 // with header rows, then seeds Tags/Library/Settings only if empty.
 // No trailing underscore: trailing-underscore functions are private and do not
