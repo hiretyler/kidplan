@@ -756,7 +756,9 @@
       max-width: 480px;
       margin: 0 auto;
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      /* 4 tabs since Wave 3.5 (Photos became the camera button) - the old
+         repeat(5) left a phantom empty column that pushed the tabs left. */
+      grid-template-columns: repeat(4, 1fr);
       height: var(--nav-h);
     }
     .nav-btn {
@@ -953,11 +955,11 @@
       cursor: pointer;
     }
     .add-backup-btn:hover { color: var(--accent); }
-    /* Naps. Two-nap-day naps read pale blue, one-nap-day naps deep blue -
-       mirrors the GCal event colors (PALE_BLUE / BLUE). */
-    .activity-item.nap-two { --chip-color: #a8bfd9; }
+    /* Naps. Two-nap-day naps read soft peacock, one-nap-day naps deep blue -
+       mirrors the GCal event colors (CYAN / BLUE). */
+    .activity-item.nap-two { --chip-color: #82b8d2; }
     .activity-item.nap-one { --chip-color: #5e81a8; }
-    .week-chip.nap-two { --chip-color: #a8bfd9; }
+    .week-chip.nap-two { --chip-color: #82b8d2; }
     .week-chip.nap-one { --chip-color: #5e81a8; }
     /* Static lane pill on nap rows (naps are always the youngest - no select). */
     .nap-kid-pill {
@@ -1222,7 +1224,7 @@
     // Add minutes to an HH:mm string, clamped to 23:59 (same calendar day).
     // Bump on every frontend deploy so Settings > About shows whether a phone
     // has the latest build loaded (v0.5 = the pre-nap-feature live build).
-    const APP_VERSION = 'v0.6';
+    const APP_VERSION = 'v0.7';
 
     // Nap insertion presets. Two-nap days: 9:00a + 2:00p at 90 min for
     // planning. One-nap days: 11:00a at 3 hrs. All editable inline after add.
@@ -2625,12 +2627,35 @@
 
             <div class="sync-hint">
               ${ICONS.calendar(false)}
-              <span>Activities and backups sync to the family Google Calendar. External events are read-only.</span>
+              <span>Activities, naps, and backups sync to the family Google Calendar. External events are read-only.</span>
             </div>
 
             <button class="btn-secondary" style="margin-top:14px;" onclick="app.openDuplicate()">${ICONS.calendar(false)} Copy this day to a date range</button>
+            ${(this.data.items || []).length
+              ? `<button class="btn-secondary" style="margin-top:10px; color:var(--warn);" onclick="app.clearDay()">${ICONS.x} Clear this day's schedule</button>`
+              : ''}
           </main>
         `;
+      },
+
+      // Wipe every planned item on the visible day (naps, activities, backups,
+      // eldest plans + their calendar events). External events are untouched.
+      async clearDay() {
+        const date = this.state.currentDate;
+        const items = this.data.items || [];
+        if (!items.length) return;
+        const n = items.length;
+        if (!confirm(`Delete all ${n} planned item${n === 1 ? '' : 's'} on this day? Their calendar events are removed too. External events are untouched.`)) return;
+        const prev = items;
+        this.data.items = [];
+        this.render();
+        try {
+          await apiCall('delete_plan_items_for_date', { date, confirm: true });
+        } catch (e) {
+          this.data.items = prev;
+          this.render();
+          alert('Could not clear the day: ' + e.message);
+        }
       },
 
       // ============================================================

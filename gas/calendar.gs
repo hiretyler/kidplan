@@ -110,14 +110,15 @@ function findEventsByItemId_(cal, dateStr, itemId) {
 
 // Event color by item kind, so the GCal grid reads at a glance:
 //   backups          -> GRAY (muted, "not the main thing")
-//   two-nap-day naps -> PALE_BLUE (lavender)
+//   two-nap-day naps -> CYAN (peacock; PALE_BLUE was indistinguishable from
+//                       the family calendar's default lavender)
 //   one-nap-day naps -> BLUE (blueberry)
 //   eldest plans + normal activities -> calendar default (no setColor call)
 function applyEventColor_(event, item) {
   const type = String(item.item_type || '');
   const isBackup = item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true';
   let color = null;
-  if (type === 'nap_two') color = CalendarApp.EventColor.PALE_BLUE;
+  if (type === 'nap_two') color = CalendarApp.EventColor.CYAN;
   else if (type === 'nap_one') color = CalendarApp.EventColor.BLUE;
   else if (isBackup && type !== 'eldest') color = CalendarApp.EventColor.GRAY;
   if (!color) return;
@@ -171,12 +172,17 @@ function deletePlanItemFromCalendar_(item) {
   return deleted;
 }
 
-// One-time cleanup - run from the editor (no trailing underscore so it shows in
-// the Run dropdown). Reconciles every 'KidPlan item <id>'-tagged event on the
-// family calendar in 2026 against PlanItems:
+// Two-way calendar reconcile - run from the editor whenever the sheet and the
+// family calendar drift (no trailing underscore so it shows in the Run
+// dropdown). Idempotent; safe to run repeatedly.
+// Phase 1 - events -> rows ('KidPlan item <id>'-tagged events in 2026):
 //   - row gone               -> delete the event (orphan)
-//   - row lost its event id  -> adopt the event, write the id back, re-sync times
+//   - row lost its event id  -> adopt the event, write the id back
 //   - extra copies for a row -> delete them, keep the one the row points at
+// Phase 2 - rows -> events: every PlanItems row is pushed back through
+// writePlanItemToCalendar_, recreating events whose initial write failed
+// (e.g. a transient calendar error swallowed as a calendar_warning) and
+// refreshing title/time/color on the rest.
 // Untagged (external/manual) events are never touched. Logs a summary.
 function cleanupCalendarOrphans() {
   const cal = getFamilyCalendar_();
@@ -186,7 +192,6 @@ function cleanupCalendarOrphans() {
   const winStart = new Date(2026, 0, 1);
   const winEnd = new Date(2027, 0, 1);
   let kept = 0, relinked = 0, orphans = 0, dupes = 0;
-  const skipped = [];
 
   cal.getEvents(winStart, winEnd).forEach((ev) => {
     const m = String(ev.getDescription() || '').match(/KidPlan item (\S+)/);
@@ -200,15 +205,9 @@ function cleanupCalendarOrphans() {
     const evId = ev.getId();
     if (!row.gcal_event_id) {
       // Adopt this copy; partial patch is safe now that upsertRow_ merges.
+      // Phase 2 re-syncs its title/times, so no write here.
       row.gcal_event_id = evId;
       upsertRow_('PlanItems', 'id', { id: row.id, gcal_event_id: evId });
-      try {
-        writePlanItemToCalendar_(row); // force title/times back to the row's truth
-      } catch (e) {
-        // Broken legacy row (e.g. blank start_time). The relink stuck; just
-        // skip the re-sync and report it instead of aborting the whole sweep.
-        skipped.push(row.id + ' (' + e.message + ')');
-      }
       relinked++;
       kept++;
     } else if (row.gcal_event_id === evId) {
@@ -219,11 +218,25 @@ function cleanupCalendarOrphans() {
     }
   });
 
-  Logger.log('cleanupCalendarOrphans: kept=%s relinked=%s orphans_deleted=%s dupes_deleted=%s',
-    kept, relinked, orphans, dupes);
-  if (skipped.length) {
-    Logger.log('relinked but could not re-sync %s row(s) - inspect/fix these PlanItems rows manually:\n%s',
-      skipped.length, skipped.join('\n'));
+  let pushed = 0;
+  const pushFailed = [];
+  getRows_('PlanItems').forEach((row) => {
+    if (!row.start_time || String(row.start_time).trim() === '') return; // broken legacy row
+    try {
+      const eventId = writePlanItemToCalendar_(row);
+      if (eventId && eventId !== row.gcal_event_id) {
+        upsertRow_('PlanItems', 'id', { id: row.id, gcal_event_id: eventId });
+      }
+      pushed++;
+    } catch (e) {
+      pushFailed.push(row.id + ' (' + e.message + ')');
+    }
+  });
+
+  Logger.log('cleanupCalendarOrphans: kept=%s relinked=%s orphans_deleted=%s dupes_deleted=%s rows_pushed=%s',
+    kept, relinked, orphans, dupes, pushed);
+  if (pushFailed.length) {
+    Logger.log('could not push %s row(s) to the calendar:\n%s', pushFailed.length, pushFailed.join('\n'));
   }
 }
 
