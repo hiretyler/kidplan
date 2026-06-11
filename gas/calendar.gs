@@ -175,6 +175,7 @@ function cleanupCalendarOrphans() {
   const winStart = new Date(2026, 0, 1);
   const winEnd = new Date(2027, 0, 1);
   let kept = 0, relinked = 0, orphans = 0, dupes = 0;
+  const skipped = [];
 
   cal.getEvents(winStart, winEnd).forEach((ev) => {
     const m = String(ev.getDescription() || '').match(/KidPlan item (\S+)/);
@@ -190,7 +191,13 @@ function cleanupCalendarOrphans() {
       // Adopt this copy; partial patch is safe now that upsertRow_ merges.
       row.gcal_event_id = evId;
       upsertRow_('PlanItems', 'id', { id: row.id, gcal_event_id: evId });
-      writePlanItemToCalendar_(row); // force title/times back to the row's truth
+      try {
+        writePlanItemToCalendar_(row); // force title/times back to the row's truth
+      } catch (e) {
+        // Broken legacy row (e.g. blank start_time). The relink stuck; just
+        // skip the re-sync and report it instead of aborting the whole sweep.
+        skipped.push(row.id + ' (' + e.message + ')');
+      }
       relinked++;
       kept++;
     } else if (row.gcal_event_id === evId) {
@@ -203,6 +210,10 @@ function cleanupCalendarOrphans() {
 
   Logger.log('cleanupCalendarOrphans: kept=%s relinked=%s orphans_deleted=%s dupes_deleted=%s',
     kept, relinked, orphans, dupes);
+  if (skipped.length) {
+    Logger.log('relinked but could not re-sync %s row(s) - inspect/fix these PlanItems rows manually:\n%s',
+      skipped.length, skipped.join('\n'));
+  }
 }
 
 // Read-only calendar ids (comma-split) from script properties (or Settings tab).
