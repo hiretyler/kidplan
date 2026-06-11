@@ -33,13 +33,16 @@ One row per planned activity. Every activity — primary or backup — lives her
 | `gcal_event_id` | string | yes | Google Calendar event ID for this row's mirrored event. Populated after the first calendar sync; used for idempotent updates. |
 | `source` | enum (string) | no | One of `manual`, `library`, `ocr`, `duplicate`. Tracks how the row entered the system. |
 | `updated_at` | datetime | no | ISO 8601 with timezone. Stamped by `upsertRow_` on every write. |
+| `item_type` | enum (string) | yes | `''` (normal activity), `nap_one` / `nap_two` (a nap inserted on a one-nap / two-nap day - Google Calendar colors BLUE / PALE_BLUE), or `eldest` (the elder kid's plan paired under a nap). Added by `migrateAddItemTypeColumn` (nap feature, v0.6). |
 
 Pairing semantics:
 
-- Each primary may have at most one paired backup (a `PlanItems` row with `is_backup = TRUE` and `backup_for_id = primary.id`).
-- Deleting a primary cascades to its backup row + calendar event.
-- Deleting a backup is isolated; the primary is unaffected.
-- Editing a primary's `date`, `start_time`, or `end_time` automatically drags the paired backup's time + calendar event to match (`upsert_plan_item` handles this server-side).
+- Each primary may have at most one paired row: a backup (`is_backup = TRUE`, `backup_for_id = primary.id`, `item_type = ''`) under a normal activity, or an **eldest plan** (`is_backup = TRUE`, `item_type = 'eldest'`, `kid = elder`) under a nap. The server rejects mismatches (a plain backup under a nap, or an eldest plan under a non-nap).
+- Eldest plans reuse all backup machinery (cascade, time-drag) but render as a real plan: `[Elder]` calendar title (no `[Backup]` prefix), default event color (no gray).
+- Deleting a primary cascades to its paired row + calendar event.
+- Deleting a paired row is isolated; the primary is unaffected.
+- Editing a primary's `date`, `start_time`, or `end_time` automatically drags the paired row's time + calendar event to match (`upsert_plan_item` handles this server-side).
+- Naps are primaries with `kid = younger`, `title = 'Nap'`, no tag. The app inserts them via the "+ Add nap" sheet: two-nap days at 9:00a + 2:00p (90 min each), one-nap days at 11:00a (3 hrs).
 
 ---
 
@@ -98,7 +101,7 @@ Singleton key-value store. Mirrors the Script Properties so the frontend can rea
 
 | Column | Type | Nullable | Notes |
 |---|---|---|---|
-| `key` | string | no | Primary key. App-editable keys: `family_calendar_id`, `read_only_calendar_ids`, `photo_drive_folder_id`. Migration also writes `backups_migrated = 'TRUE'` so `migrateToBackupsModelV2` knows it has already run. Secrets (`API_TOKEN`, `VISION_SERVICE_ACCOUNT_JSON`) live ONLY in Script Properties, never in this tab, and are never returned by `get_settings`. |
+| `key` | string | no | Primary key. App-editable keys: `family_calendar_id`, `read_only_calendar_ids`, `photo_drive_folder_id`, `nap_mode` (`one` or `two`; pre-selects the Add-nap sheet's answer, default `two` when unset). Migration also writes `backups_migrated = 'TRUE'` so `migrateToBackupsModelV2` knows it has already run. Secrets (`API_TOKEN`, `VISION_SERVICE_ACCOUNT_JSON`) live ONLY in Script Properties, never in this tab, and are never returned by `get_settings`. |
 | `value` | string | no | Stringified value. For `read_only_calendar_ids` this is a comma-separated string. |
 
 ---

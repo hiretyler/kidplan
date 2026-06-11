@@ -19,10 +19,13 @@ function getFamilyCalendar_() {
 
 // Title convention. Kid lane prefix, plus a [Backup] prefix when the item is a
 // paired backup so it reads as "not the main thing" at a glance in the GCal grid.
+// Eldest plans are paired (is_backup) but are a real plan, not a fallback - they
+// read as plain [Elder] events.
 function planItemTitle_(item) {
   const prefixes = { shared: '[Shared]', elder: '[Elder]', younger: '[Younger]' };
   const lane = prefixes[item.kid] || '[Shared]';
-  const backup = (item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true') ? '[Backup] ' : '';
+  const isEldest = String(item.item_type || '') === 'eldest';
+  const backup = (!isEldest && (item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true')) ? '[Backup] ' : '';
   return backup + lane + ' ' + (item.title || '');
 }
 
@@ -65,7 +68,6 @@ function writePlanItemToCalendar_(item) {
   const endTime = (item.end_time && String(item.end_time).trim() !== '')
     ? item.end_time
     : addMinutesToTime_(item.start_time, 60);
-  const isBackup = item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true';
 
   // Update path: fetch existing event and mutate in place. If the row lost its
   // event id (or never saved it), adopt an event already tagged with this
@@ -80,7 +82,7 @@ function writePlanItemToCalendar_(item) {
       dateTimeFrom_(item.date, item.start_time),
       dateTimeFrom_(item.date, endTime)
     );
-    applyBackupColor_(existing, isBackup);
+    applyEventColor_(existing, item);
     return existing.getId();
   }
 
@@ -90,7 +92,7 @@ function writePlanItemToCalendar_(item) {
     dateTimeFrom_(item.date, endTime),
     { description: description, location: location }
   );
-  applyBackupColor_(created, isBackup);
+  applyEventColor_(created, item);
   return created.getId();
 }
 
@@ -106,12 +108,21 @@ function findEventsByItemId_(cal, dateStr, itemId) {
   return cal.getEvents(dayStart, dayEnd).filter((ev) => String(ev.getDescription() || '').indexOf(tag) !== -1);
 }
 
-// Graphite (eventColor 8) for backups so they read as muted in the GCal grid.
-// Primaries get the calendar's default color (no setColor call).
-function applyBackupColor_(event, isBackup) {
-  if (!isBackup) return;
+// Event color by item kind, so the GCal grid reads at a glance:
+//   backups          -> GRAY (muted, "not the main thing")
+//   two-nap-day naps -> PALE_BLUE (lavender)
+//   one-nap-day naps -> BLUE (blueberry)
+//   eldest plans + normal activities -> calendar default (no setColor call)
+function applyEventColor_(event, item) {
+  const type = String(item.item_type || '');
+  const isBackup = item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true';
+  let color = null;
+  if (type === 'nap_two') color = CalendarApp.EventColor.PALE_BLUE;
+  else if (type === 'nap_one') color = CalendarApp.EventColor.BLUE;
+  else if (isBackup && type !== 'eldest') color = CalendarApp.EventColor.GRAY;
+  if (!color) return;
   try {
-    event.setColor(CalendarApp.EventColor.GRAY);
+    event.setColor(color);
   } catch (e) {
     // setColor can throw on older runtimes; failure to color is non-fatal.
   }

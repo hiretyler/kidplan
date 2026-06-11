@@ -26,7 +26,10 @@ function sheetTz_() {
 // Header rows per docs/data-model.md. Source of truth for setup + column order.
 // Days tab was removed in Wave 3.5: all planning state lives on PlanItems now.
 const SHEET_HEADERS_ = {
-  PlanItems: ['id', 'date', 'kid', 'title', 'description', 'start_time', 'end_time', 'location', 'tag', 'is_backup', 'backup_for_id', 'gcal_event_id', 'source', 'updated_at'],
+  // item_type: '' = normal activity, 'nap_one'/'nap_two' = a nap inserted on a
+  // one-nap/two-nap day (colors differ), 'eldest' = the elder kid's plan paired
+  // under a nap (reuses the is_backup pairing machinery, renders as [Elder]).
+  PlanItems: ['id', 'date', 'kid', 'title', 'description', 'start_time', 'end_time', 'location', 'tag', 'is_backup', 'backup_for_id', 'gcal_event_id', 'source', 'updated_at', 'item_type'],
   Library: ['id', 'name', 'tag', 'description', 'indoor', 'typical_duration_min', 'kid_age_fit', 'notes'],
   Tags: ['tag', 'color', 'display_order', 'is_preset'],
   Photos: ['id', 'drive_file_id', 'uploaded_at', 'covers_date_range_start', 'covers_date_range_end', 'ocr_text', 'parsed_json', 'reconciled'],
@@ -222,6 +225,20 @@ function deleteRow_(tabName, keyColumn, keyValue) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// One-shot migration for the nap feature (run once from the editor; idempotent).
+// Appends the item_type column to the live PlanItems tab. Existing rows read
+// back '' = normal activity, so no data rewrite is needed.
+function migrateAddItemTypeColumn() {
+  const sheet = openTab_('PlanItems');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf('item_type') !== -1) {
+    Logger.log('item_type column already exists - nothing to do');
+    return;
+  }
+  sheet.getRange(1, headers.length + 1).setValue('item_type');
+  Logger.log('item_type column added to PlanItems');
 }
 
 // Editor-run inspector (log only, changes nothing). Lists PlanItems rows with a

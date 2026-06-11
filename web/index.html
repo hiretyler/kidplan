@@ -531,6 +531,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      min-width: 0; /* let long names wrap instead of squeezing the meta block */
     }
     .library-card .swatch {
       width: 10px; height: 10px;
@@ -543,6 +544,8 @@
       align-items: center;
       font-size: 12px;
       color: var(--ink-soft);
+      flex-shrink: 0;          /* meta never crushes into "60\nmin" stacks */
+      white-space: nowrap;
     }
     .library-card .desc {
       margin-top: 6px;
@@ -557,7 +560,10 @@
       background: var(--surface-warm);
       color: var(--ink-soft);
       font-weight: 500;
+      white-space: nowrap;
     }
+    /* Keep the FAB from covering the last library card. */
+    .library-list { padding-bottom: 84px; }
 
     .fab {
       position: fixed;
@@ -947,6 +953,18 @@
       cursor: pointer;
     }
     .add-backup-btn:hover { color: var(--accent); }
+    /* Naps. Two-nap-day naps read pale blue, one-nap-day naps deep blue -
+       mirrors the GCal event colors (PALE_BLUE / BLUE). */
+    .activity-item.nap-two { --chip-color: #a8bfd9; }
+    .activity-item.nap-one { --chip-color: #5e81a8; }
+    .week-chip.nap-two { --chip-color: #a8bfd9; }
+    .week-chip.nap-one { --chip-color: #5e81a8; }
+    /* Static lane pill on nap rows (naps are always the youngest - no select). */
+    .nap-kid-pill {
+      font-size: 13px; padding: 7px 12px;
+      border-radius: var(--radius-sm);
+      background: var(--surface-warm); color: var(--ink-soft);
+    }
     /* External calendar event (read-only) - greyed inline tick in the timeline. */
     .external-event {
       padding: 10px 0;
@@ -1202,6 +1220,23 @@
       return 'c-' + (tag || '').toLowerCase().replace(/\s+/g, '-');
     }
     // Add minutes to an HH:mm string, clamped to 23:59 (same calendar day).
+    // Bump on every frontend deploy so Settings > About shows whether a phone
+    // has the latest build loaded (v0.5 = the pre-nap-feature live build).
+    const APP_VERSION = 'v0.6';
+
+    // Nap insertion presets. Two-nap days: 9:00a + 2:00p at 90 min for
+    // planning. One-nap days: 11:00a at 3 hrs. All editable inline after add.
+    const NAP_PRESETS = {
+      two: { label: 'Two naps', detail: '9:00 AM + 2:00 PM · 90 min each', type: 'nap_two', naps: [
+        { start_time: '09:00', end_time: '10:30' },
+        { start_time: '14:00', end_time: '15:30' },
+      ]},
+      one: { label: 'One nap', detail: '11:00 AM · 3 hrs', type: 'nap_one', naps: [
+        { start_time: '11:00', end_time: '14:00' },
+      ]},
+    };
+    function isNapItem(it) { return String(it.item_type || '').indexOf('nap') === 0; }
+
     // Client-minted PlanItem id (same 12-hex shape as the server's genId_).
     // Minting before the save makes a retried/duplicated submit upsert the SAME
     // row instead of creating a second one.
@@ -1383,6 +1418,17 @@
         applyTagColors(this.data.tags);
       },
 
+      // Background prefetch so the nap sheet knows the nap_mode default without
+      // a round trip when it opens. Fire-and-forget from the Today load.
+      async ensureSettings() {
+        if (this.data.settings && Object.keys(this.data.settings).length) return;
+        try {
+          this.data.settings = await apiCall('get_settings', {});
+        } catch (e) {
+          // Non-fatal: the nap sheet falls back to the two-nap default.
+        }
+      },
+
       async loadView() {
         this.state.loading = true;
         this.state.error = '';
@@ -1392,6 +1438,7 @@
           const v = this.state.currentView;
           if (v === 'today') {
             const date = this.state.currentDate;
+            this.ensureSettings(); // deliberately not awaited
             // Library powers the picker; calendar events give us conflict awareness.
             const [items, library, events] = await Promise.all([
               apiCall('list_plan_items', { date }),
@@ -1784,6 +1831,7 @@
         switch (m.kind) {
           case 'picker':    inner = this.renderLibraryPicker(m); break;
           case 'when':      inner = this.renderWhenSheet(m); break;
+          case 'nap':       inner = this.renderNapSheet(m); break;
           case 'planItem':  inner = this.renderPlanItemEditor(m); break;
           case 'duplicate': inner = this.renderDuplicateEditor(m); break;
           case 'library':   inner = this.renderLibraryEditor(m); break;
@@ -1955,6 +2003,91 @@
         this.openModal({ kind: 'picker', mode: 'backup', primary });
       },
 
+      // Eldest plan = the elder kid's activity during a nap. Same picker flow
+      // as backups, but lane is forced to elder and item_type marks the role.
+      openEldestPicker(napId) {
+        const nap = (this.data.items || []).find(it => it.id === napId);
+        if (!nap) return;
+        if (nap._saving) {
+          alert('Still saving the nap. Try again in a moment.');
+          return;
+        }
+        this.state.pickerFilter = 'all';
+        this.state.pickerSearch = '';
+        this.openModal({ kind: 'picker', mode: 'eldest', primary: nap });
+      },
+
+      // ---------- Nap sheet (one-tap nap insertion) ----------
+      // Slide-up question: one-nap or two-nap day? Pre-selected from the
+      // Settings nap_mode default; Add inserts the preset rows.
+      openNapSheet() {
+        const def = (this.data.settings && this.data.settings.nap_mode) === 'one' ? 'one' : 'two';
+        this.openModal({ kind: 'nap', napMode: def });
+      },
+
+      setNapSheetMode(mode) {
+        const m = this.state.modal;
+        if (!m || m.kind !== 'nap') return;
+        m.napMode = mode;
+        this.render();
+      },
+
+      renderNapSheet(m) {
+        const opt = (key) => {
+          const p = NAP_PRESETS[key];
+          return `
+            <button type="button" class="tag-chip ${m.napMode === key ? 'primary' : 'outlined'}"
+              style="flex:1; justify-content:center; cursor:pointer; flex-direction:column; gap:2px; padding:12px 8px;"
+              onclick="app.setNapSheetMode('${key}')">
+              <span style="font-weight:600;">${p.label}</span>
+              <span style="font-size:11px; opacity:0.8;">${p.detail}</span>
+            </button>
+          `;
+        };
+        return `
+          ${this.modalHeader('Add nap')}
+          <div style="margin-bottom:10px; font-size:13px; color:var(--ink-soft);">What kind of nap day is it?</div>
+          <div style="display:flex; gap:8px; margin-bottom:18px;">
+            ${opt('one')}${opt('two')}
+          </div>
+          <button class="btn-primary" onclick="app.confirmAddNap()">Add to day</button>
+          <div style="font-size:12px; color:var(--ink-soft); margin-top:14px; line-height:1.45;">
+            Times are editable from the nap row afterward. The pre-selected answer comes from Settings.
+          </div>
+        `;
+      },
+
+      async confirmAddNap() {
+        const m = this.state.modal;
+        if (!m || m.kind !== 'nap') return;
+        const preset = NAP_PRESETS[m.napMode] || NAP_PRESETS.two;
+        const date = this.state.currentDate;
+        const rows = preset.naps.map(n => ({
+          id: genId(),
+          date, kid: 'younger', title: 'Nap', description: '',
+          start_time: n.start_time, end_time: n.end_time,
+          location: '', tag: '', source: 'manual',
+          is_backup: false, backup_for_id: '',
+          item_type: preset.type,
+        }));
+        this.data.items = (this.data.items || []).concat(rows.map(r => Object.assign({ _saving: true }, r)));
+        this.closeModal();
+        this.render();
+        for (const params of rows) {
+          try {
+            const res = await apiCallRaw('upsert_plan_item', params);
+            this.state.calendarNotice = res.calendar_warning || '';
+            let found = false;
+            this.data.items = this.data.items.map(it => it.id === params.id ? (found = true, res.data) : it);
+            if (!found && res.data.date === this.state.currentDate) this.data.items.push(res.data);
+          } catch (e) {
+            this.data.items = this.data.items.filter(it => it.id !== params.id);
+            alert('Could not add nap: ' + e.message);
+          }
+        }
+        this.render();
+      },
+
       setPickerFilter(tag) {
         this.state.pickerFilter = tag;
         this.render();
@@ -1998,7 +2131,9 @@
         const filters = ['all'].concat(sortedTags.map(t => t.tag));
         const headerTitle = m && m.mode === 'backup'
           ? `Backup for: ${escapeHtml(m.primary.title)} (${escapeHtml(formatTime(m.primary.start_time))})`
-          : 'Add activity';
+          : m && m.mode === 'eldest'
+            ? `Eldest plan during nap (${escapeHtml(formatTime(m.primary.start_time))})`
+            : 'Add activity';
         return `
           ${this.modalHeader(headerTitle)}
           <button class="picker-newbtn" onclick="app.openLibraryEditor('', true)">${ICONS.plusSm} New activity</button>
@@ -2022,7 +2157,7 @@
         if (!lib) return;
         const m = this.state.modal || {};
         const mode = m.mode || 'primary';
-        const primary = mode === 'backup' ? m.primary : null;
+        const primary = (mode === 'backup' || mode === 'eldest') ? m.primary : null;
         const defaultStart = primary
           ? primary.start_time
           : suggestNextHour_();
@@ -2032,7 +2167,9 @@
           lib,
           primaryId: primary ? primary.id : '',
           startTime: defaultStart,
-          kid: primary ? (primary.kid || 'shared') : 'shared'
+          // Eldest plans are for the elder kid by definition; the lane chips
+          // are hidden in the When sheet for that mode.
+          kid: mode === 'eldest' ? 'elder' : (primary ? (primary.kid || 'shared') : 'shared')
         });
       },
 
@@ -2041,7 +2178,9 @@
         const lbl = 'display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;';
         const inp = 'width:100%; padding:11px 12px; border:1px solid var(--ink-faint); border-radius:var(--radius-sm); font-size:15px; background:var(--surface); font-family:inherit;';
         const lanes = [['shared','Shared'],['elder','Elder'],['younger','Younger']];
-        const title = m.mode === 'backup' ? 'When? (backup)' : 'When?';
+        const title = m.mode === 'backup' ? 'When? (backup)'
+          : m.mode === 'eldest' ? 'When? (eldest plan)'
+          : 'When?';
         return `
           ${this.modalHeader(title)}
           <div style="margin-bottom:16px;">
@@ -2055,6 +2194,12 @@
             <label style="${lbl}">Start time *</label>
             <input id="when_start" type="time" style="${inp}" value="${escapeHtml(m.startTime || '')}" required>
           </div>
+          ${m.mode === 'eldest' ? `
+          <div style="${fld}">
+            <label style="${lbl}">For</label>
+            <span class="nap-kid-pill">Elder (while the youngest naps)</span>
+          </div>
+          ` : `
           <div style="${fld}">
             <label style="${lbl}">For</label>
             <div style="display:flex; gap:8px;">
@@ -2066,7 +2211,8 @@
               `).join('')}
             </div>
           </div>
-          <button class="btn-primary" onclick="app.confirmAddFromWhen()">${m.mode === 'backup' ? 'Add backup' : 'Add to day'}</button>
+          `}
+          <button class="btn-primary" onclick="app.confirmAddFromWhen()">${m.mode === 'backup' ? 'Add backup' : m.mode === 'eldest' ? 'Add eldest plan' : 'Add to day'}</button>
           <div style="font-size:12px; color:var(--ink-soft); margin-top:14px; line-height:1.45;">
             End time, description, location, ${m.mode === 'backup' ? '' : 'and a backup, '}all editable from the activity row afterward.
           </div>
@@ -2097,9 +2243,10 @@
         const end_time = !isNaN(dur) && dur > 0
           ? addMinutesToTime(start_time, dur)
           : addMinutesToTime(start_time, 60);
+        const paired = m.mode === 'backup' || m.mode === 'eldest';
         const params = {
           date,
-          kid: m.kid || 'shared',
+          kid: m.mode === 'eldest' ? 'elder' : (m.kid || 'shared'),
           title: lib.name,
           description: lib.description || '',
           start_time,
@@ -2107,8 +2254,9 @@
           location: '',
           tag: lib.tag || '',
           source: 'library',
-          is_backup: m.mode === 'backup',
-          backup_for_id: m.mode === 'backup' ? (m.primaryId || '') : ''
+          is_backup: paired,
+          backup_for_id: paired ? (m.primaryId || '') : '',
+          item_type: m.mode === 'eldest' ? 'eldest' : ''
         };
         // Mint the real id client-side: if this submit is ever repeated (slow
         // network, impatient tap) the server upserts the same row instead of
@@ -2380,6 +2528,7 @@
                 <div style="font-family:var(--font-display); font-weight:600; font-size:17px; color:var(--ink); margin-bottom:4px;">Nothing planned yet</div>
                 <div style="margin-bottom:16px;">Tap below to pick something from your Library.</div>
                 <button class="btn-primary" onclick="app.openPicker()">${ICONS.plusSm} Add activity</button>
+                <button class="link-btn" style="margin-top:10px;" onclick="app.openNapSheet()">+ Add nap</button>
                 <div class="sync-hint">
                   ${ICONS.calendar(false)}
                   <span>Activities and backups sync to the family Google Calendar.</span>
@@ -2410,33 +2559,42 @@
           lanes.map(([v,l]) => `<option value="${v}" ${selectedKid === v ? 'selected' : ''}>${l}</option>`).join('');
 
         const renderPrimary = (it) => {
-          const backup = backupsBy[it.id];
+          const paired = backupsBy[it.id];
+          const nap = isNapItem(it);
+          // Naps carry their own color class (one-nap vs two-nap day); the
+          // paired slot under a nap is an Eldest plan, not a backup.
+          const itemClass = nap ? (it.item_type === 'nap_one' ? 'nap-one' : 'nap-two') : tagClass(it.tag);
+          const pairedLabel = nap ? 'Eldest plan' : 'Backup';
+          const ghostLabel = nap ? 'Eldest plan' : 'Add backup';
+          const ghostOpen = nap ? 'openEldestPicker' : 'openBackupPicker';
           return `
-            <div class="activity-item ${tagClass(it.tag)}">
+            <div class="activity-item ${itemClass}">
               <div class="activity-top">
                 <span class="swatch"></span>
                 <span class="title" onclick="app.openPlanItem('${escapeHtml(it.id)}')">${escapeHtml(it.title)}</span>
                 <button class="activity-del" onclick="app.deletePlanItem('${escapeHtml(it.id)}')" aria-label="Remove">${ICONS.x}</button>
               </div>
               <div class="activity-controls">
-                <select class="inline-select" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','kid',this.value)">
-                  ${laneOptions(it.kid)}
-                </select>
+                ${nap
+                  ? `<span class="nap-kid-pill">Younger</span>`
+                  : `<select class="inline-select" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','kid',this.value)">
+                      ${laneOptions(it.kid)}
+                    </select>`}
                 <input class="inline-time" type="time" value="${escapeHtml(it.start_time || '')}" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','start_time',this.value)">
                 <span class="inline-time-sep">to</span>
                 <input class="inline-time" type="time" value="${escapeHtml(it.end_time || '')}" onchange="app.updatePlanItemField('${escapeHtml(it.id)}','end_time',this.value)">
               </div>
-              ${backup
+              ${paired
                 ? `
-                  <div class="backup-row ${tagClass(backup.tag)}">
-                    <span class="backup-label">${ICONS.bookmarkSm} Backup</span>
-                    <span class="backup-title" onclick="app.openPlanItem('${escapeHtml(backup.id)}')">${escapeHtml(backup.title)}</span>
-                    <button class="activity-del" onclick="app.deletePlanItem('${escapeHtml(backup.id)}')" aria-label="Remove backup">${ICONS.x}</button>
+                  <div class="backup-row ${tagClass(paired.tag)}">
+                    <span class="backup-label">${ICONS.bookmarkSm} ${pairedLabel}</span>
+                    <span class="backup-title" onclick="app.openPlanItem('${escapeHtml(paired.id)}')">${escapeHtml(paired.title)}</span>
+                    <button class="activity-del" onclick="app.deletePlanItem('${escapeHtml(paired.id)}')" aria-label="Remove ${pairedLabel}">${ICONS.x}</button>
                   </div>
                 `
                 : (it._saving
                     ? `<span class="add-backup-btn" style="opacity:0.5;">Saving…</span>`
-                    : `<button class="add-backup-btn" onclick="app.openBackupPicker('${escapeHtml(it.id)}')">${ICONS.plusSm} Add backup</button>`)
+                    : `<button class="add-backup-btn" onclick="app.${ghostOpen}('${escapeHtml(it.id)}')">${ICONS.plusSm} ${ghostLabel}</button>`)
               }
             </div>
           `;
@@ -2462,6 +2620,7 @@
               <h3>Today <span class="label-pill">calendar</span></h3>
               ${timeline.map(t => t.kind === 'primary' ? renderPrimary(t.item) : renderExternal(t.item)).join('')}
               <button class="link-btn" onclick="app.openPicker()">+ Add activity</button>
+              <button class="link-btn" onclick="app.openNapSheet()">+ Add nap</button>
             </section>
 
             <div class="sync-hint">
@@ -2507,10 +2666,12 @@
                 const d = parseISO(dateIso);
                 const isToday = dateIso === todayIso;
                 const dayItems = (itemsByDate[dateIso] || []);
+                // Eldest plans are paired rows but real plans - they get a chip
+                // like any activity; only true backups go in the bookmark count.
                 const primaries = dayItems
-                  .filter(it => !asBool(it.is_backup))
+                  .filter(it => !asBool(it.is_backup) || it.item_type === 'eldest')
                   .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
-                const backups = dayItems.filter(it => asBool(it.is_backup));
+                const backups = dayItems.filter(it => asBool(it.is_backup) && it.item_type !== 'eldest');
                 const externals = externalsByDate[dateIso] || [];
                 const summary = !primaries.length && !externals.length
                   ? '— no plans —'
@@ -2525,7 +2686,7 @@
                       </div>
                       <div class="summary">
                         <div class="primary-line">${escapeHtml(summary)}</div>
-                        <div class="tag-line">${primaries.map(p => `<span class="week-chip ${tagClass(p.tag)}"><span class="swatch"></span>${escapeHtml(p.title)}</span>`).join('')}${externals.map(() => `<span class="week-tick"></span>`).join('')}</div>
+                        <div class="tag-line">${primaries.map(p => `<span class="week-chip ${isNapItem(p) ? (p.item_type === 'nap_one' ? 'nap-one' : 'nap-two') : tagClass(p.tag)}"><span class="swatch"></span>${escapeHtml(p.title)}</span>`).join('')}${externals.map(() => `<span class="week-tick"></span>`).join('')}</div>
                       </div>
                       <div class="icons">${backups.length ? `${ICONS.bookmarkSm}<span style="font-size:11px;">${backups.length}</span>` : ''}</div>
                     </div>
@@ -2613,6 +2774,21 @@
         `;
       },
 
+      // Persist the default nap day (pre-selects the Add-nap sheet's answer).
+      async setNapMode(mode) {
+        const s = this.data.settings || (this.data.settings = {});
+        const prev = s.nap_mode;
+        s.nap_mode = mode;
+        this.render();
+        try {
+          await apiCall('update_setting', { key: 'nap_mode', value: mode });
+        } catch (e) {
+          s.nap_mode = prev;
+          this.render();
+          alert('Could not save: ' + e.message);
+        }
+      },
+
       // ============================================================
       // SETTINGS
       // ============================================================
@@ -2622,6 +2798,7 @@
         const family = s.family_calendar_id || '';
         const readOnly = (s.read_only_calendar_ids || '').split(',').map(x => x.trim()).filter(Boolean);
         const folder = s.photo_drive_folder_id || '';
+        const napMode = s.nap_mode === 'one' ? 'one' : 'two';
         const mono = 'font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break:break-all;';
 
         return `
@@ -2664,6 +2841,20 @@
             </div>
 
             <div class="settings-section">
+              <h3>Naps</h3>
+              <div class="settings-row">
+                <span class="label">Default nap day</span>
+                <div style="display:flex; gap:6px;">
+                  <button class="tag-chip ${napMode === 'one' ? 'primary' : 'outlined'}" style="cursor:pointer;" onclick="app.setNapMode('one')">One nap</button>
+                  <button class="tag-chip ${napMode === 'two' ? 'primary' : 'outlined'}" style="cursor:pointer;" onclick="app.setNapMode('two')">Two naps</button>
+                </div>
+              </div>
+              <div style="font-size:12px; color:var(--ink-soft); line-height:1.45;">
+                Pre-selects the answer when you tap "+ Add nap" on a day. Two-nap days insert 9:00 AM + 2:00 PM (90 min); one-nap days insert 11:00 AM (3 hrs).
+              </div>
+            </div>
+
+            <div class="settings-section">
               <h3>Access</h3>
               <div class="settings-row">
                 <span class="label">Access token</span>
@@ -2679,7 +2870,7 @@
               </div>
               <div class="settings-row">
                 <span class="label">Build</span>
-                <span class="value">Wave 3.5 - live</span>
+                <span class="value">${APP_VERSION}</span>
               </div>
             </div>
           </main>

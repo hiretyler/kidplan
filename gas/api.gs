@@ -55,6 +55,15 @@ const upsert_plan_item = (params) => {
   for (const k in params) item[k] = params[k];
   if (!item.id) item.id = genId_();
   if (!item.source) item.source = 'manual';
+  // item_type is optional; when present it must be a known value. Omitting it
+  // on an update preserves the stored value (upsertRow_ merges).
+  if (item.item_type !== undefined) {
+    const t = String(item.item_type || '');
+    if (['', 'nap_one', 'nap_two', 'eldest'].indexOf(t) === -1) {
+      throw new Error('unknown item_type: ' + t);
+    }
+    item.item_type = t;
+  }
   // Normalize the backup pairing fields so blanks land in the sheet, not 'undefined'.
   item.is_backup = item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true';
   if (item.is_backup) {
@@ -62,6 +71,21 @@ const upsert_plan_item = (params) => {
     const primary = getRowByKey_('PlanItems', 'id', item.backup_for_id);
     if (!primary) throw new Error('backup_for_id does not exist: ' + item.backup_for_id);
     if (asBool_(primary.is_backup)) throw new Error('cannot chain a backup onto another backup');
+    // Eldest plans pair only with naps; plain backups only with activities.
+    // Updates may omit item_type (upsertRow_ merges) - validate against the
+    // stored value in that case.
+    const parentIsNap = String(primary.item_type || '').indexOf('nap') === 0;
+    let effType = item.item_type;
+    if (effType === undefined) {
+      const stored = getRowByKey_('PlanItems', 'id', item.id);
+      effType = stored ? String(stored.item_type || '') : '';
+    }
+    if (effType === 'eldest' && !parentIsNap) {
+      throw new Error('an eldest plan must pair with a nap');
+    }
+    if (effType !== 'eldest' && parentIsNap) {
+      throw new Error('use an eldest plan (not a backup) under a nap');
+    }
   } else {
     item.backup_for_id = '';
   }
@@ -377,7 +401,7 @@ const reconcile_photo = (params) => {
 };
 
 // Keys the API is allowed to read/write. Secrets are never exposed.
-const EDITABLE_SETTING_KEYS_ = ['family_calendar_id', 'read_only_calendar_ids', 'photo_drive_folder_id'];
+const EDITABLE_SETTING_KEYS_ = ['family_calendar_id', 'read_only_calendar_ids', 'photo_drive_folder_id', 'nap_mode'];
 
 // Safe script properties surfaced to the frontend (never API_TOKEN / service acct).
 const SAFE_SCRIPT_PROPERTY_KEYS_ = {

@@ -1,0 +1,11 @@
+# KidPlan app shell. Always revalidate index.html so phones pick up new builds
+# on the next open (Settings > About > Build shows the loaded version).
+# Icons/manifest change rarely and may cache for a day.
+<IfModule mod_headers.c>
+  <Files "index.html">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </Files>
+  <FilesMatch "\.(png|webmanifest)$">
+    Header set Cache-Control "max-age=86400"
+  </FilesMatch>
+</IfModule>
