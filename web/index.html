@@ -1202,6 +1202,14 @@
       return 'c-' + (tag || '').toLowerCase().replace(/\s+/g, '-');
     }
     // Add minutes to an HH:mm string, clamped to 23:59 (same calendar day).
+    // Client-minted PlanItem id (same 12-hex shape as the server's genId_).
+    // Minting before the save makes a retried/duplicated submit upsert the SAME
+    // row instead of creating a second one.
+    function genId() {
+      const bytes = crypto.getRandomValues(new Uint8Array(6));
+      return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
     function addMinutesToTime(t, mins) {
       if (!t) return '';
       const [h, m] = t.split(':').map(Number);
@@ -1390,7 +1398,11 @@
               apiCall('list_library', {}),
               apiCall('list_calendar_events', { start: date, end: date }).catch(() => [])
             ]);
-            this.data.items = items || [];
+            // Keep in-flight optimistic rows (not on the server yet) so a
+            // refetch racing a slow save doesn't make the new activity vanish.
+            const inFlight = (this.data.items || []).filter(it =>
+              it._saving && it.date === date && !(items || []).some(s => s.id === it.id));
+            this.data.items = (items || []).concat(inFlight);
             this.data.library = library || [];
             this.data.externals = (events || []).filter(e => e.source === 'external');
           } else if (v === 'week') {
@@ -1881,8 +1893,9 @@
         try {
           const res = await apiCallRaw('upsert_plan_item', params);
           this.state.calendarNotice = res.calendar_warning || '';
+          this.reconcileSavedItem(res.data);
           this.closeModal();
-          this.loadView();
+          this.render();
         } catch (e) {
           alert('Could not save: ' + e.message);
         }
@@ -1894,14 +1907,17 @@
       },
 
       async deletePlanItem(id) {
-        // Optimistic: drop locally and re-render, then confirm with server.
+        // Optimistic: drop locally (a primary takes its paired backup with it,
+        // matching the server cascade) and re-render, then confirm with server.
         const prev = this.data.items;
-        this.data.items = prev.filter(it => it.id !== id);
+        const victim = (prev || []).find(it => it.id === id);
+        const cascades = victim && !asBool(victim.is_backup);
+        this.data.items = prev.filter(it =>
+          it.id !== id && !(cascades && asBool(it.is_backup) && it.backup_for_id === id));
         this.closeModal();
         this.render();
         try {
           await apiCall('delete_plan_item', { id });
-          this.loadView();
         } catch (e) {
           this.data.items = prev;
           this.render();
@@ -1928,9 +1944,9 @@
       openBackupPicker(primaryId) {
         const primary = (this.data.items || []).find(it => it.id === primaryId);
         if (!primary) return;
-        // Optimistic temp rows haven't been saved yet; their id can't be a valid
+        // In-flight rows haven't been saved yet; their id isn't a valid
         // backup_for_id. Tell the user to wait rather than letting the server reject.
-        if (String(primary.id).startsWith('temp_')) {
+        if (primary._saving) {
           alert('Still saving the activity. Try again in a moment.');
           return;
         }
@@ -2094,19 +2110,42 @@
           is_backup: m.mode === 'backup',
           backup_for_id: m.mode === 'backup' ? (m.primaryId || '') : ''
         };
-        const tempId = 'temp_' + Date.now();
-        this.data.items = (this.data.items || []).concat([Object.assign({ id: tempId }, params)]);
+        // Mint the real id client-side: if this submit is ever repeated (slow
+        // network, impatient tap) the server upserts the same row instead of
+        // minting a duplicate. _saving marks the row as in-flight for the UI.
+        params.id = genId();
+        this.data.items = (this.data.items || []).concat([Object.assign({ _saving: true }, params)]);
         this.closeModal();
         this.render();
         try {
           const res = await apiCallRaw('upsert_plan_item', params);
           this.state.calendarNotice = res.calendar_warning || '';
-          this.data.items = this.data.items.map(it => it.id === tempId ? res.data : it);
+          let found = false;
+          this.data.items = this.data.items.map(it => it.id === params.id ? (found = true, res.data) : it);
+          // A racing refetch may have dropped the in-flight row; re-attach it.
+          if (!found && res.data.date === this.state.currentDate) this.data.items.push(res.data);
           this.render();
         } catch (e) {
-          this.data.items = this.data.items.filter(it => it.id !== tempId);
+          this.data.items = this.data.items.filter(it => it.id !== params.id);
           this.render();
           alert('Could not add: ' + e.message);
+        }
+      },
+
+      // Merge a saved item back into local state and mirror the server-side
+      // backup drag (a backup's date/times follow its primary) so we don't need
+      // a full refetch after every save.
+      reconcileSavedItem(saved) {
+        const items = this.data.items || [];
+        const row = items.find(x => x.id === saved.id);
+        if (row) Object.assign(row, saved);
+        if (!asBool(saved.is_backup)) {
+          const backup = items.find(b => asBool(b.is_backup) && b.backup_for_id === saved.id);
+          if (backup) {
+            backup.date = saved.date;
+            backup.start_time = saved.start_time;
+            backup.end_time = saved.end_time;
+          }
         }
       },
 
@@ -2131,14 +2170,12 @@
         try {
           const res = await apiCallRaw('upsert_plan_item', params);
           this.state.calendarNotice = res.calendar_warning || '';
-          Object.assign(it, res.data);
-          // A primary time edit drags the backup along server-side; refresh so
-          // the paired backup row picks up the new time too.
-          if ((field === 'start_time' || field === 'end_time') && !asBool(it.is_backup)) {
-            this.loadView();
-            return;
+          // Mirrors the server-side backup drag locally - no full refetch
+          // (the post-edit reloads were jarring on the phone).
+          this.reconcileSavedItem(res.data);
+          if (field === 'start_time' || field === 'end_time' || this.state.calendarNotice) {
+            this.render(); // time edits can reorder the day list
           }
-          if (this.state.calendarNotice) this.render();
         } catch (e) {
           it[field] = prev;
           this.render();
@@ -2397,7 +2434,7 @@
                     <button class="activity-del" onclick="app.deletePlanItem('${escapeHtml(backup.id)}')" aria-label="Remove backup">${ICONS.x}</button>
                   </div>
                 `
-                : (String(it.id).startsWith('temp_')
+                : (it._saving
                     ? `<span class="add-backup-btn" style="opacity:0.5;">Saving…</span>`
                     : `<button class="add-backup-btn" onclick="app.openBackupPicker('${escapeHtml(it.id)}')">${ICONS.plusSm} Add backup</button>`)
               }

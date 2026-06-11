@@ -67,21 +67,21 @@ function writePlanItemToCalendar_(item) {
     : addMinutesToTime_(item.start_time, 60);
   const isBackup = item.is_backup === true || item.is_backup === 'TRUE' || item.is_backup === 'true';
 
-  // Update path: fetch existing event and mutate in place.
-  if (item.gcal_event_id) {
-    const existing = cal.getEventById(item.gcal_event_id);
-    if (existing) {
-      existing.setTitle(title);
-      existing.setDescription(description);
-      existing.setLocation(location);
-      existing.setTime(
-        dateTimeFrom_(item.date, item.start_time),
-        dateTimeFrom_(item.date, endTime)
-      );
-      applyBackupColor_(existing, isBackup);
-      return existing.getId();
-    }
-    // Event id was set but the event is gone; fall through to recreate.
+  // Update path: fetch existing event and mutate in place. If the row lost its
+  // event id (or never saved it), adopt an event already tagged with this
+  // item's id rather than minting a duplicate.
+  let existing = item.gcal_event_id ? cal.getEventById(item.gcal_event_id) : null;
+  if (!existing) existing = findEventsByItemId_(cal, item.date, item.id)[0] || null;
+  if (existing) {
+    existing.setTitle(title);
+    existing.setDescription(description);
+    existing.setLocation(location);
+    existing.setTime(
+      dateTimeFrom_(item.date, item.start_time),
+      dateTimeFrom_(item.date, endTime)
+    );
+    applyBackupColor_(existing, isBackup);
+    return existing.getId();
   }
 
   const created = cal.createEvent(
@@ -92,6 +92,18 @@ function writePlanItemToCalendar_(item) {
   );
   applyBackupColor_(created, isBackup);
   return created.getId();
+}
+
+// Events on the item's date whose description carries the 'KidPlan item <id>'
+// tag. Recovers rows whose gcal_event_id went missing and lets delete sweep
+// stray duplicate copies.
+function findEventsByItemId_(cal, dateStr, itemId) {
+  if (!dateStr || !itemId) return [];
+  const d = String(dateStr).split('-');
+  const dayStart = new Date(parseInt(d[0], 10), parseInt(d[1], 10) - 1, parseInt(d[2], 10), 0, 0, 0);
+  const dayEnd = new Date(parseInt(d[0], 10), parseInt(d[1], 10) - 1, parseInt(d[2], 10) + 1, 0, 0, 0);
+  const tag = 'KidPlan item ' + itemId;
+  return cal.getEvents(dayStart, dayEnd).filter((ev) => String(ev.getDescription() || '').indexOf(tag) !== -1);
 }
 
 // Graphite (eventColor 8) for backups so they read as muted in the GCal grid.
@@ -124,16 +136,73 @@ function buildDescription_(item) {
   return parts.join('\n');
 }
 
-// Delete by gcal_event_id; no-op if missing or already gone.
+// Delete by gcal_event_id, then sweep any id-tagged strays on the same date
+// (covers rows whose gcal_event_id was lost and duplicate event copies).
 function deletePlanItemFromCalendar_(item) {
-  if (!item || !item.gcal_event_id) return false;
+  if (!item) return false;
   const cal = getFamilyCalendar_();
-  const existing = cal.getEventById(item.gcal_event_id);
-  if (existing) {
-    existing.deleteEvent();
-    return true;
+  let deleted = false;
+  if (item.gcal_event_id) {
+    const existing = cal.getEventById(item.gcal_event_id);
+    if (existing) {
+      existing.deleteEvent();
+      deleted = true;
+    }
   }
-  return false;
+  findEventsByItemId_(cal, item.date, item.id).forEach((ev) => {
+    try {
+      ev.deleteEvent();
+      deleted = true;
+    } catch (e) {
+      // Already deleted via gcal_event_id above; sweep result can include it.
+    }
+  });
+  return deleted;
+}
+
+// One-time cleanup - run from the editor (no trailing underscore so it shows in
+// the Run dropdown). Reconciles every 'KidPlan item <id>'-tagged event on the
+// family calendar in 2026 against PlanItems:
+//   - row gone               -> delete the event (orphan)
+//   - row lost its event id  -> adopt the event, write the id back, re-sync times
+//   - extra copies for a row -> delete them, keep the one the row points at
+// Untagged (external/manual) events are never touched. Logs a summary.
+function cleanupCalendarOrphans() {
+  const cal = getFamilyCalendar_();
+  const rowsById = {};
+  getRows_('PlanItems').forEach((r) => { rowsById[r.id] = r; });
+
+  const winStart = new Date(2026, 0, 1);
+  const winEnd = new Date(2027, 0, 1);
+  let kept = 0, relinked = 0, orphans = 0, dupes = 0;
+
+  cal.getEvents(winStart, winEnd).forEach((ev) => {
+    const m = String(ev.getDescription() || '').match(/KidPlan item (\S+)/);
+    if (!m) return; // not a KidPlan event
+    const row = rowsById[m[1]];
+    if (!row) {
+      ev.deleteEvent();
+      orphans++;
+      return;
+    }
+    const evId = ev.getId();
+    if (!row.gcal_event_id) {
+      // Adopt this copy; partial patch is safe now that upsertRow_ merges.
+      row.gcal_event_id = evId;
+      upsertRow_('PlanItems', 'id', { id: row.id, gcal_event_id: evId });
+      writePlanItemToCalendar_(row); // force title/times back to the row's truth
+      relinked++;
+      kept++;
+    } else if (row.gcal_event_id === evId) {
+      kept++;
+    } else {
+      ev.deleteEvent();
+      dupes++;
+    }
+  });
+
+  Logger.log('cleanupCalendarOrphans: kept=%s relinked=%s orphans_deleted=%s dupes_deleted=%s',
+    kept, relinked, orphans, dupes);
 }
 
 // Read-only calendar ids (comma-split) from script properties (or Settings tab).

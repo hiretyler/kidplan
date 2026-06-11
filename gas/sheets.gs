@@ -151,24 +151,32 @@ function upsertRow_(tabName, keyColumn, rowObj) {
     const keyIdx = headers.indexOf(keyColumn);
     if (keyIdx === -1) throw new Error('key column not found: ' + keyColumn + ' in ' + tabName);
 
-    // Stamp updated_at if the tab tracks it.
-    const merged = {};
-    for (const k in rowObj) merged[k] = rowObj[k];
-    if (headers.indexOf('updated_at') !== -1) {
-      merged.updated_at = Utilities.formatDate(new Date(), TZ_, "yyyy-MM-dd'T'HH:mm:ssXXX");
-    }
-
-    const rowArr = headers.map((h) => coerceCellForWrite_(merged[h], h));
-
     // Locate an existing row by key.
     let targetRow = -1;
-    const keyStr = String(merged[keyColumn]);
+    const keyStr = String(rowObj[keyColumn]);
     for (let r = 1; r < values.length; r++) {
       if (String(values[r][keyIdx]) === keyStr) {
         targetRow = r + 1; // 1-based sheet row
         break;
       }
     }
+
+    // Seed from the existing row so a partial patch only touches the columns it
+    // names. Without this, every upsert blanked unsent columns - notably
+    // gcal_event_id, which made each edit CREATE a fresh calendar event (and
+    // left deletes unable to find the old one).
+    const merged = {};
+    if (targetRow !== -1) {
+      headers.forEach((h, c) => { merged[h] = values[targetRow - 1][c]; });
+    }
+    for (const k in rowObj) merged[k] = rowObj[k];
+    // Stamp updated_at if the tab tracks it.
+    if (headers.indexOf('updated_at') !== -1) {
+      merged.updated_at = Utilities.formatDate(new Date(), TZ_, "yyyy-MM-dd'T'HH:mm:ssXXX");
+    }
+
+    const rowArr = headers.map((h) => coerceCellForWrite_(merged[h], h));
+
     if (targetRow === -1) targetRow = values.length + 1;
 
     const range = sheet.getRange(targetRow, 1, 1, headers.length);
