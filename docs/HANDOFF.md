@@ -19,7 +19,7 @@ Phone-first web app for Tyler + wife Soleil to plan their two kids' summer days.
 - GAS Script ID: `1FYSj3sQ-ddQgacjWmPnicZ297ufV-Q3aNi4DFSzstkLgZe6LjDnREoFb`
 - Editor: `https://script.google.com/d/1FYSj3sQ-ddQgacjWmPnicZ297ufV-Q3aNi4DFSzstkLgZe6LjDnREoFb/edit`
 - Deployment ID (stable - always redeploy with `-i` this): `AKfycbxJ7oc6WazWnkr0YLrE9S-2c4w04Xz6K4bRgx276EkJPYJN3Z48lnO56QeF9Hlm02ye`
-- `/exec` URL: `https://script.google.com/macros/s/<deploymentId>/exec` (currently @18 - Wave 4a + 4b live).
+- `/exec` URL: `https://script.google.com/macros/s/<deploymentId>/exec` (currently @22 - v0.8).
 - Family calendar ID (script prop `FAMILY_CALENDAR_ID`): `3716c55ac1e5c3159e66479cf85951e662bacb12f4ed00da0cf2d0db86a2cff3@group.calendar.google.com`
 - Script Properties set: `API_TOKEN`, `SHEET_ID`, `FAMILY_CALENDAR_ID`, `PHOTO_DRIVE_FOLDER_ID` (= `1F1Nfq8_K_zyf0dU_ZfYg_iehcBQLAfXi`), `GEMINI_API_KEY`. Optional/unset: `READ_ONLY_CALENDAR_IDS`, `FRONTEND_URL`, `GEMINI_MODEL` (defaults to `gemini-2.5-flash`). Secrets live ONLY in Script Properties.
 - GCP project: standard Cloud project `kidplan` (project number `444981393891`), **Vision API + Drive API enabled, billing attached** (Vision needs billing; first 1000 OCR/mo free). OAuth consent in Testing mode with soleilandtyler@gmail.com as the only Test user. Apps Script linked to this GCP project; deployer consented to the `cloud-vision` + full `drive` scopes (DriveApp.createFile into a pre-made folder needs full `drive`).
@@ -53,7 +53,7 @@ rsync -avz -e "ssh -i $HOME/.ssh/tgeddes_dev -p 21098" web/ tgedlpaf@tgeddes.dev
 - Wave 4b (parse OCR into PlanItem candidates + review/accept UI): DONE + LIVE (@18), but accuracy is **PRIMITIVE and paused** - see the "PRIMITIVE" backlog section below. Pipeline = Vision word boxes -> grid reconstruction (`gas/parse.gs`) -> Gemini Flash cleanup (`gas/gemini.gs`, regex fallback) -> review pane -> `reconcile_photo` upserts accepted events as `source='ocr'`. NOTE: the live "Add events" -> calendar write path has NOT yet been exercised by a real reconcile (do this as part of Wave 5).
 - Wave 5 (end-to-end verify on both phones + `simplify` pass): simplify pass DONE; phone verify PENDING (blocked on hosting the frontend).
 
-## RIGHT NOW - pick up here (2026-06-10)
+## RIGHT NOW - pick up here (2026-06-11)
 
 Frontend is HOSTED at `tgeddes.dev/kidplan/`, both phones logged in. First real use by Soleil (2026-06-10) hit the **upsertRow_ column-wipe bug**: `upsertRow_` wrote the full row width so any column missing from a patch was blanked - the client never sends `gcal_event_id`, so every inline edit wiped it, every save took the calendar CREATE path (one orphan GCal event per edit), and deletes could not find their event. Fixed and deployed @19 (commit `5f58b42`): `upsertRow_` now merges over the existing row; `writePlanItemToCalendar_` adopts an event tagged `KidPlan item <id>` before creating; `deletePlanItemFromCalendar_` sweeps id-tagged strays; client mints real PlanItem ids (`genId()`, `_saving` flag replaces `temp_` ids), keeps in-flight rows across refetches, and patches state locally instead of `loadView()` reload storms.
 
