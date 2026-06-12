@@ -1223,7 +1223,10 @@
     }
     // Add minutes to an HH:mm string, clamped to 23:59 (same calendar day).
     // Bump on every frontend deploy so Settings > About shows whether a phone
-    // has the latest build loaded (v0.5 = the pre-nap-feature live build).
+    // has the latest build loaded. Versioning policy (Tyler, 2026-06-11):
+    // conservative increments - patch bumps (v0.8.1, v0.8.2...) for fixes and
+    // small features, minor bumps for real milestones. v0.9 = photo-calendar
+    // pipeline revived; v1.0 = paper-calendar photo import at 90-95% accuracy.
     const APP_VERSION = 'v0.8';
 
     // Nap insertion presets. Two-nap days: 9:00a + 2:00p at 90 min for

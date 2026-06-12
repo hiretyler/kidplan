@@ -1,6 +1,6 @@
 # KidPlan - session handoff / status
 
-Last updated: 2026-06-11 (v0.7 LIVE: GAS @21 + frontend rsynced. Naps verified working on phones (migration ran). v0.7 = centered bottom nav (4-col grid fix), "Clear this day's schedule" button, nap_two GCal color PALE_BLUE->CYAN, and `cleanupCalendarOrphans` upgraded to a two-way reconcile - run it once to recreate Tyler's missing 11-2 one-nap event + recolor existing naps. See RIGHT NOW.) Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
+Last updated: 2026-06-11 (v0.8 LIVE: GAS @22 + frontend rsynced. Naps verified end-to-end on phones AND Google Calendar - the missing-event bug was the getEventById-returns-trashed-events quirk, fixed @22 by resolving events only through the same-day getEvents sweep. v0.7 = nav fix + Clear-day button + nap CYAN color + two-way reconcile; v0.8 = Indoor checkbox/icon removed from Library. **Versioning policy: conservative from here - v0.8.x patch bumps for fixes/small features; v0.9 = photo-calendar pipeline revived; v1.0 = paper-calendar photo import at 90-95% accuracy.** See RIGHT NOW.) Purpose: let a fresh session (or Tyler) pick up without re-deriving context. For the deep plan and decisions, the build plan lives at `~/.claude/plans/create-an-app-to-eventual-honey.md`; tag/column schemas in `docs/data-model.md`; one-time setup in `docs/setup-checklist.md`.
 
 ## What this is
 
@@ -61,12 +61,11 @@ Done since: frontend re-uploaded via rsync (new build verified live), `cleanupCa
 
 v0.6 follow-ups shipped as v0.7 (2026-06-11, GAS @21): naps tested live; Tyler's one-nap 11-2 calendar event never wrote (transient, surfaced only as a dismissible calendar_warning) -> `cleanupCalendarOrphans` is now a two-way reconcile whose phase 2 pushes every row back to the calendar (recreates missing events, refreshes title/time/color). Also: bottom nav 5->4 column fix, Clear-day button (wires `delete_plan_items_for_date`), nap_two color CYAN.
 
-Remaining:
+Remaining (next milestone = v0.9: revive the photo pipeline; the parser is PRIMITIVE - see backlog. v1.0 bar = 90-95% accuracy on real wall-calendar photos):
 
-1. **Run `cleanupCalendarOrphans`** once from the GAS editor - recreates the missing 11-2 nap event and recolors the existing nap events to the new CYAN/BLUE scheme. (`migrateAddItemTypeColumn` already ran on 2026-06-11.)
-2. **Triage 4 PlanItems rows with blank `start_time`** (`a17cba080d27`, `de6ac44db898`, `132b781836ad`, `6ee6f512a22b` - likely pre-3.5 test rows). Run `listPlanItemsMissingStartTime` (editor, `sheets.gs`) to see date/title/source. Real activity -> set its time in the app; junk -> delete the row from the PlanItems tab, then re-run `cleanupCalendarOrphans` to sweep its (now relinked) calendar event as an orphan.
-3. **Wave 5 phone verify.** On both phones: run the core flow (add activity from library -> appears on Today + family Google Calendar; edit time -> SAME event moves; delete -> event disappears; week view; backups; add nap -> eldest plan). Then do one real **photo import -> Add events** to finally exercise the `reconcile_photo` calendar-write path live.
-4. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix + v0.6 commits - push when ready.
+1. **Triage 4 PlanItems rows with blank `start_time`** (`a17cba080d27`, `de6ac44db898`, `132b781836ad`, `6ee6f512a22b` - likely pre-3.5 test rows). Run `listPlanItemsMissingStartTime` (editor, `sheets.gs`) to see date/title/source. Real activity -> set its time in the app; junk -> delete the row from the PlanItems tab, then re-run `cleanupCalendarOrphans` to sweep its (now relinked) calendar event as an orphan.
+2. **Wave 5 wrap-up.** Core flows are verified live on phones (add/edit/delete/naps/calendar sync). Still owed: one real **photo import -> Add events** to exercise the `reconcile_photo` calendar-write path live (doubles as the v0.9 starting point).
+3. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix + v0.6 commits - push when ready.
 
 ## Wave 3.5 - shipped LIVE on @8 (2026-05-28)
 
