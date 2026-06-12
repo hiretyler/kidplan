@@ -65,7 +65,7 @@ Remaining (next milestone = v0.9: revive the photo pipeline; the parser is PRIMI
 
 1. **Triage 4 PlanItems rows with blank `start_time`** (`a17cba080d27`, `de6ac44db898`, `132b781836ad`, `6ee6f512a22b` - likely pre-3.5 test rows). Run `listPlanItemsMissingStartTime` (editor, `sheets.gs`) to see date/title/source. Real activity -> set its time in the app; junk -> delete the row from the PlanItems tab, then re-run `cleanupCalendarOrphans` to sweep its (now relinked) calendar event as an orphan.
 2. **Wave 5 wrap-up.** Core flows are verified live on phones (add/edit/delete/naps/calendar sync). Still owed: one real **photo import -> Add events** to exercise the `reconcile_photo` calendar-write path live (doubles as the v0.9 starting point).
-3. **Push to GitHub.** Local `main` is ahead of `origin/main` by the Wave 4a/4b/5 + bugfix + v0.6 commits - push when ready.
+3. ~~Push to GitHub~~ - DONE 2026-06-11 (`origin/main` @ the versioning-policy commit).
 
 ## Wave 3.5 - shipped LIVE on @8 (2026-05-28)
 
